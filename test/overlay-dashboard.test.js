@@ -411,6 +411,64 @@ test('dashboard controls offer corresponding source without adding a passive ove
   assert.match(html, /OpenPrintTag Material Database[\s\S]+are searched on this server[\s\S]+MIT License/);
 });
 
+test('clicking the camera dismisses the dashboard and tool editor', async () => {
+  const runtime = createRuntime({ height: 1080 });
+  const controls = runtime.elements.get('dashboard-controls');
+  const handle = runtime.elements.get('controls-handle');
+  const camera = runtime.elements.get('camera-stage');
+
+  handle.dispatch('click');
+  assert.equal(controls.classList.contains('open'), true);
+  assert.equal(handle.getAttribute('aria-expanded'), 'true');
+
+  camera.dispatch('click');
+  assert.equal(controls.classList.contains('open'), false);
+  assert.equal(handle.getAttribute('aria-expanded'), 'false');
+
+  handle.dispatch('click');
+  runtime.elements.get('tools-configure').dispatch('click');
+  await flushPromises();
+  const row = runtime.api.getToolEditorRows()[0];
+  row.input.value = 'Unsaved custom PLA';
+  row.input.dispatch('input');
+  assert.equal(runtime.elements.get('tools-editor').hidden, false);
+  assert.equal(controls.classList.contains('tool-editor-open'), true);
+
+  camera.dispatch('click');
+  assert.equal(runtime.elements.get('tools-editor').hidden, true);
+  assert.equal(runtime.elements.get('controls-main').hidden, false);
+  assert.equal(controls.classList.contains('tool-editor-open'), false);
+  assert.equal(controls.classList.contains('open'), false);
+  assert.equal(handle.getAttribute('aria-expanded'), 'false');
+  assert.equal(runtime.elements.get('tools-configure').focused, false);
+  assert.equal(runtime.fetchCalls.some(
+    (call) => call.url === '/api/settings/tools' && call.options.method === 'PUT',
+  ), false);
+});
+
+test('clicking the camera cannot hide tool settings while a save is in progress', async () => {
+  const runtime = createRuntime({
+    height: 1080,
+    toolSettings: makeToolSettingsView({ toolCount: 1 }),
+    savePromise: new Promise(() => {}),
+  });
+  runtime.api.openToolEditor();
+  await flushPromises();
+  const row = runtime.api.getToolEditorRows()[0];
+  row.input.value = 'Saving custom PLA';
+  row.input.dispatch('input');
+
+  const saving = runtime.api.saveToolSettings();
+  runtime.elements.get('camera-stage').dispatch('click');
+
+  assert.equal(runtime.elements.get('tools-editor').hidden, false);
+  assert.equal(runtime.elements.get('dashboard-controls').classList.contains('open'), true);
+  assert.equal(runtime.elements.get('controls-handle').getAttribute('aria-expanded'), 'true');
+
+  runtime.runTimers(runtime.api.TOOL_SETTINGS_SAVE_TIMEOUT_MS);
+  await saving;
+});
+
 test('job-map identities tolerate casing differences between local and cloud filenames', () => {
   const runtime = createRuntime({ height: 420 });
   assert.equal(runtime.api.sameJobKey('42::PART.BGCODE', '42::part.bgcode'), true);

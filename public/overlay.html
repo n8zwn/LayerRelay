@@ -1950,6 +1950,14 @@
       if (toolEditorOpen) return;
       setControlsOpen(!el.dashboardControls.classList.contains('open'));
     });
+    el.cameraStage.addEventListener('click', function () {
+      if (!toolEditorOpen && !el.dashboardControls.classList.contains('open')) return;
+      if (toolEditorOpen) {
+        closeToolEditor(false);
+        if (toolEditorOpen) return;
+      }
+      setControlsOpen(false);
+    });
     el.controlsClose.addEventListener('click', function () { setControlsOpen(false); });
     el.toolsConfigure.addEventListener('click', openToolEditor);
     el.toolEditorCancel.addEventListener('click', function () { closeToolEditor(true); });
