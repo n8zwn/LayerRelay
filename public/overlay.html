@@ -38,6 +38,25 @@
   .tnum { font-variant-numeric: tabular-nums; }
 
   /* === Integrated camera dashboard ======================================== */
+  /* Secondary nozzle picture-in-picture: draggable (top bar), resizable
+     (bottom-right corner), default top-left, position remembered per browser. */
+  #nozzle-pip {
+    position: fixed; top: 16px; left: 16px; z-index: 3;
+    width: 22vw; height: 17vw; max-width: 480px; min-width: 150px; min-height: 120px;
+    border-radius: 12px; overflow: hidden; background: #08090c;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+    resize: both;
+  }
+  #nozzle-pip[hidden] { display: none; }
+  #nozzle-bar {
+    height: 22px; display: flex; align-items: center; gap: 6px;
+    padding: 0 8px; font-size: 11px; letter-spacing: 0.04em; color: #cdd3de;
+    background: rgba(0, 0, 0, 0.55); cursor: grab; user-select: none; touch-action: none;
+  }
+  #nozzle-pip.dragging #nozzle-bar { cursor: grabbing; }
+  #nozzle-bar .nozzle-dot { width: 7px; height: 7px; border-radius: 50%; background: #3ecf6b; }
+  #nozzle-feed { width: 100%; height: calc(100% - 22px); object-fit: cover; display: block; }
   #camera-stage {
     position: fixed; inset: 0; z-index: 0;
     overflow: hidden; background: #08090c;
@@ -140,6 +159,13 @@
   }
   .control-action:hover, .control-action:focus-visible { background: rgba(255, 255, 255, 0.14); outline: none; }
   .control-action:disabled { opacity: 0.42; cursor: default; }
+  a.control-action { display: block; text-align: center; text-decoration: none; }
+  #timelapse-link[hidden] { display: none; }
+  #timelapse-controls { padding: 4px 2px 6px; }
+  #timelapse-controls[hidden] { display: none; }
+  .tl-label { display: block; font-size: 11px; color: #cdd3de; margin-bottom: 4px; }
+  #timelapse-interval-val { color: #ff8a3d; }
+  .tl-slider { width: 100%; }
   #room-toggle {
     width: 100%; border: 0; text-align: left; background: transparent; cursor: pointer;
   }
@@ -472,6 +498,11 @@
   </div>
 </div>
 
+<div id="nozzle-pip" hidden>
+  <div id="nozzle-bar"><span class="nozzle-dot"></span>Nozzle</div>
+  <img id="nozzle-feed" alt="Nozzle camera" />
+</div>
+
 <div id="dashboard-controls" class="idle" data-camera-state="connecting">
   <button id="controls-handle" type="button" aria-expanded="false" aria-controls="controls-panel">
     <span class="control-live-dot"></span><span>Dashboard</span>
@@ -505,6 +536,11 @@
       </div>
       <div id="tool-settings-announcement" class="sr-only" role="status" aria-live="polite"></div>
       <div class="controls-foot" id="dashboard-mode-note">Camera mode follows the browser-source height.</div>
+      <div id="timelapse-controls" hidden>
+        <label class="tl-label" for="timelapse-interval">Timelapse interval <span id="timelapse-interval-val">10s</span></label>
+        <input id="timelapse-interval" class="tl-slider" type="range" min="1" max="20" step="1" value="10">
+      </div>
+      <a id="timelapse-link" class="control-action" href="#" target="_blank" rel="noopener" hidden>Timelapses</a>
       <div class="controls-legal">
         <a id="source-link" href="/source" target="_blank" rel="noopener">Source &amp; AGPL license</a>
         <span aria-hidden="true"> · </span><span>No warranty</span>
@@ -657,6 +693,137 @@
   }
 
   var cameraOverride = queryFlag('camera');
+  var nozzleOverride = queryFlag('nozzle');
+  var nozzleAttachedUrl = null;
+  var nozzleRetryTimer = null;
+  var nozzlePipInit = false;
+  function initNozzlePip() {
+    if (nozzlePipInit) return;
+    nozzlePipInit = true;
+    var pip = document.getElementById('nozzle-pip');
+    var bar = document.getElementById('nozzle-bar');
+    if (!pip || !bar) return;
+    var KEY = 'lr_nozzle_pip';
+    function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+    function save() {
+      try {
+        var r = pip.getBoundingClientRect();
+        localStorage.setItem(KEY, JSON.stringify({
+          left: Math.round(r.left), top: Math.round(r.top),
+          w: Math.round(r.width), h: Math.round(r.height)
+        }));
+      } catch (e) { /* storage unavailable */ }
+    }
+    try {
+      var saved = JSON.parse(localStorage.getItem(KEY) || 'null');
+      if (saved) {
+        if (saved.w) pip.style.width = saved.w + 'px';
+        if (saved.h) pip.style.height = saved.h + 'px';
+        if (typeof saved.left === 'number') pip.style.left = clamp(saved.left, 0, window.innerWidth - 40) + 'px';
+        if (typeof saved.top === 'number') pip.style.top = clamp(saved.top, 0, window.innerHeight - 40) + 'px';
+      }
+    } catch (e) { /* ignore bad json */ }
+    var dragging = false, sx = 0, sy = 0, ox = 0, oy = 0;
+    bar.addEventListener('pointerdown', function (e) {
+      dragging = true;
+      pip.classList.add('dragging');
+      var r = pip.getBoundingClientRect();
+      pip.style.left = r.left + 'px'; pip.style.top = r.top + 'px';
+      sx = e.clientX; sy = e.clientY; ox = r.left; oy = r.top;
+      try { bar.setPointerCapture(e.pointerId); } catch (e2) { /* older browsers */ }
+      e.preventDefault(); e.stopPropagation();
+    });
+    bar.addEventListener('pointermove', function (e) {
+      if (!dragging) return;
+      pip.style.left = clamp(ox + (e.clientX - sx), 0, window.innerWidth - pip.offsetWidth) + 'px';
+      pip.style.top = clamp(oy + (e.clientY - sy), 0, window.innerHeight - pip.offsetHeight) + 'px';
+    });
+    function endDrag() { if (!dragging) return; dragging = false; pip.classList.remove('dragging'); save(); }
+    bar.addEventListener('pointerup', endDrag);
+    bar.addEventListener('pointercancel', endDrag);
+    if (window.ResizeObserver) {
+      var ro = new ResizeObserver(function () { if (!dragging) save(); });
+      ro.observe(pip);
+    }
+  }
+  function updateTimelapseLink(url) {
+    var link = document.getElementById('timelapse-link');
+    if (!link) return;
+    if (typeof url === 'string' && /^https?:\/\//.test(url)) {
+      link.href = url;
+      link.hidden = false;
+    } else {
+      link.hidden = true;
+    }
+  }
+  var tlIntervalDragging = false;
+  var tlSliderReady = false;
+  function initTimelapseSlider() {
+    if (tlSliderReady) return;
+    var slider = document.getElementById('timelapse-interval');
+    var val = document.getElementById('timelapse-interval-val');
+    if (!slider) return;
+    tlSliderReady = true;
+    slider.addEventListener('input', function () {
+      tlIntervalDragging = true;
+      if (val) val.textContent = slider.value + 's';
+    });
+    slider.addEventListener('change', function () {
+      var n = parseInt(slider.value, 10);
+      tlIntervalDragging = false;
+      fetch('/api/settings/timelapse', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ intervalSec: n })
+      }).catch(function () { /* best effort */ });
+    });
+  }
+  function updateTimelapseControls(url, intervalSec) {
+    var wrap = document.getElementById('timelapse-controls');
+    var slider = document.getElementById('timelapse-interval');
+    var val = document.getElementById('timelapse-interval-val');
+    if (!wrap || !slider) return;
+    var show = typeof url === 'string' && /^https?:\/\//.test(url);
+    wrap.hidden = !show;
+    if (!show) return;
+    initTimelapseSlider();
+    if (!tlIntervalDragging && typeof intervalSec === 'number' && intervalSec >= 1 && intervalSec <= 20) {
+      slider.value = String(intervalSec);
+      if (val) val.textContent = intervalSec + 's';
+    }
+  }
+  function applyNozzleStatus(status, pipUrl) {
+    var pip = document.getElementById('nozzle-pip');
+    var feed = document.getElementById('nozzle-feed');
+    if (!pip || !feed) return;
+    // Prefer a direct browser-to-source URL (e.g. go2rtc MJPEG) so the PiP is
+    // low-latency; fall back to LayerRelay's server-side relay if none is set.
+    var direct = typeof pipUrl === 'string' && pipUrl.trim() !== '';
+    var url = direct ? pipUrl.trim() : '/api/nozzle.mjpeg';
+    var enabled = nozzleOverride == null
+      ? (direct || !!(status && status.enabled))
+      : !!nozzleOverride;
+    if (!enabled) {
+      pip.hidden = true;
+      if (nozzleAttachedUrl) { feed.removeAttribute('src'); nozzleAttachedUrl = null; }
+      if (nozzleRetryTimer) { clearTimeout(nozzleRetryTimer); nozzleRetryTimer = null; }
+      return;
+    }
+    pip.hidden = false;
+    initNozzlePip();
+    function bust(u) { return u + (u.indexOf('?') >= 0 ? '&' : '?') + '_=' + Date.now(); }
+    if (nozzleAttachedUrl !== url) {
+      nozzleAttachedUrl = url;
+      feed.onerror = function () {
+        if (nozzleRetryTimer) return;
+        nozzleRetryTimer = setTimeout(function () {
+          nozzleRetryTimer = null;
+          if (!pip.hidden) feed.src = bust(url);
+        }, 2000);
+      };
+      feed.src = bust(url);
+    }
+  }
   var cameraAuto = window.innerHeight > CAMERA_AUTO_MIN_HEIGHT;
   var CAMERA_ENABLED = cameraOverride == null ? cameraAuto : cameraOverride;
   var controlsOverride = queryFlag('controls');
@@ -2553,6 +2720,9 @@
         if (seq !== S.pollSeq) return;
         S.data = j; S.syncedAt = performance.now(); S.failures = 0;
         if (CAMERA_ENABLED) applyCameraStatus(j.camera);
+        applyNozzleStatus(j.nozzle, j.nozzlePipUrl);
+        updateTimelapseLink(j.timelapseUrl);
+        updateTimelapseControls(j.timelapseUrl, j.timelapseIntervalSec);
         // Smoothing buffer for Z: keep the last few readings so render can reject z-hop spikes.
         if (j.axisZ != null) { S.zHist.push(j.axisZ); if (S.zHist.length > 4) S.zHist.shift(); }
       })
