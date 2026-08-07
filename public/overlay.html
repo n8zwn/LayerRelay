@@ -166,6 +166,11 @@
   .tl-label { display: block; font-size: 11px; color: #cdd3de; margin-bottom: 4px; }
   #timelapse-interval-val { color: #ff8a3d; }
   .tl-slider { width: 100%; }
+  .tl-check { display: block; font-size: 11px; color: #cdd3de; margin-bottom: 6px; cursor: pointer; }
+  .tl-check input { vertical-align: middle; margin-right: 6px; }
+  #timelapse-controls.perlayer .tl-label,
+  #timelapse-controls.perlayer .tl-slider { opacity: 0.4; }
+  .tl-slider:disabled { cursor: default; }
   #room-toggle {
     width: 100%; border: 0; text-align: left; background: transparent; cursor: pointer;
   }
@@ -537,6 +542,7 @@
       <div id="tool-settings-announcement" class="sr-only" role="status" aria-live="polite"></div>
       <div class="controls-foot" id="dashboard-mode-note">Camera mode follows the browser-source height.</div>
       <div id="timelapse-controls" hidden>
+        <label class="tl-check"><input id="timelapse-perlayer" type="checkbox"> Capture one frame per layer</label>
         <label class="tl-label" for="timelapse-interval">Timelapse interval <span id="timelapse-interval-val">10s</span></label>
         <input id="timelapse-interval" class="tl-slider" type="range" min="1" max="20" step="1" value="10">
       </div>
@@ -758,10 +764,18 @@
   }
   var tlIntervalDragging = false;
   var tlSliderReady = false;
+  function putTimelapse(bodyObj) {
+    fetch('/api/settings/timelapse', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(bodyObj)
+    }).catch(function () { /* best effort */ });
+  }
   function initTimelapseSlider() {
     if (tlSliderReady) return;
     var slider = document.getElementById('timelapse-interval');
     var val = document.getElementById('timelapse-interval-val');
+    var perlayer = document.getElementById('timelapse-perlayer');
     if (!slider) return;
     tlSliderReady = true;
     slider.addEventListener('input', function () {
@@ -769,24 +783,29 @@
       if (val) val.textContent = slider.value + 's';
     });
     slider.addEventListener('change', function () {
-      var n = parseInt(slider.value, 10);
       tlIntervalDragging = false;
-      fetch('/api/settings/timelapse', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ intervalSec: n })
-      }).catch(function () { /* best effort */ });
+      putTimelapse({ intervalSec: parseInt(slider.value, 10) });
     });
+    if (perlayer) {
+      perlayer.addEventListener('change', function () {
+        putTimelapse({ perLayer: perlayer.checked });
+      });
+    }
   }
-  function updateTimelapseControls(url, intervalSec) {
+  function updateTimelapseControls(url, intervalSec, perLayer) {
     var wrap = document.getElementById('timelapse-controls');
     var slider = document.getElementById('timelapse-interval');
     var val = document.getElementById('timelapse-interval-val');
+    var perlayer = document.getElementById('timelapse-perlayer');
     if (!wrap || !slider) return;
     var show = typeof url === 'string' && /^https?:\/\//.test(url);
     wrap.hidden = !show;
     if (!show) return;
     initTimelapseSlider();
+    var isLayer = perLayer === true;
+    if (perlayer && document.activeElement !== perlayer) perlayer.checked = isLayer;
+    wrap.classList.toggle('perlayer', isLayer);
+    slider.disabled = isLayer;
     if (!tlIntervalDragging && typeof intervalSec === 'number' && intervalSec >= 1 && intervalSec <= 20) {
       slider.value = String(intervalSec);
       if (val) val.textContent = intervalSec + 's';
@@ -2722,7 +2741,7 @@
         if (CAMERA_ENABLED) applyCameraStatus(j.camera);
         applyNozzleStatus(j.nozzle, j.nozzlePipUrl);
         updateTimelapseLink(j.timelapseUrl);
-        updateTimelapseControls(j.timelapseUrl, j.timelapseIntervalSec);
+        updateTimelapseControls(j.timelapseUrl, j.timelapseIntervalSec, j.timelapsePerLayer);
         // Smoothing buffer for Z: keep the last few readings so render can reject z-hop spikes.
         if (j.axisZ != null) { S.zHist.push(j.axisZ); if (S.zHist.length > 4) S.zHist.shift(); }
       })

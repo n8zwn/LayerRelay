@@ -95,9 +95,11 @@ function clampTimelapseInterval(value) {
   return Number.isFinite(n) ? Math.min(20, Math.max(1, n)) : 10;
 }
 let timelapseIntervalSec = 10;
+let timelapsePerLayer = false;
 try {
   const savedTl = JSON.parse(fs.readFileSync(TIMELAPSE_INTERVAL_FILE, 'utf8'));
   if (savedTl && savedTl.intervalSec != null) timelapseIntervalSec = clampTimelapseInterval(savedTl.intervalSec);
+  if (savedTl && typeof savedTl.perLayer === 'boolean') timelapsePerLayer = savedTl.perLayer;
 } catch { /* keep default */ }
 const toolSettingsStore = createToolSettingsStore({
   dataFile: path.join(CACHE_DIR, 'tool-settings.json'),
@@ -1178,6 +1180,7 @@ app.get('/api/state', (_req, res) => {
     timelapseUrl: cfg.timelapseUrl || null,
     nozzlePipUrl: cfg.nozzlePipUrl || null,
     timelapseIntervalSec,
+    timelapsePerLayer,
     // Ambient room/outdoor readings from the Netatmo station (null when not configured).
     roomTemp: netatmoLive ? netatmoLive.roomTemp : null,
     roomHumidity: netatmoLive ? netatmoLive.roomHumidity : null,
@@ -1216,17 +1219,26 @@ app.get('/api/thumbnail', (req, res) => {
 // No-store so OBS's browser (CEF) doesn't serve a stale overlay after edits.
 const noStore = (res) => res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
 app.put('/api/settings/timelapse', sameOriginSettingsWrite, (req, res) => {
-  const n = Number((req.body || {}).intervalSec);
-  if (!Number.isInteger(n) || n < 1 || n > 20) {
-    return res.status(400).json({ error: 'intervalSec must be an integer from 1 to 20' });
+  const body = req.body || {};
+  if (body.intervalSec !== undefined) {
+    const n = Number(body.intervalSec);
+    if (!Number.isInteger(n) || n < 1 || n > 20) {
+      return res.status(400).json({ error: 'intervalSec must be an integer from 1 to 20' });
+    }
+    timelapseIntervalSec = n;
   }
-  timelapseIntervalSec = n;
+  if (body.perLayer !== undefined) {
+    if (typeof body.perLayer !== 'boolean') {
+      return res.status(400).json({ error: 'perLayer must be a boolean' });
+    }
+    timelapsePerLayer = body.perLayer;
+  }
   try {
-    writeJsonAtomic(TIMELAPSE_INTERVAL_FILE, { intervalSec: n });
+    writeJsonAtomic(TIMELAPSE_INTERVAL_FILE, { intervalSec: timelapseIntervalSec, perLayer: timelapsePerLayer });
   } catch {
-    return res.status(500).json({ error: 'could not save timelapse interval' });
+    return res.status(500).json({ error: 'could not save timelapse settings' });
   }
-  return res.json({ intervalSec: n });
+  return res.json({ intervalSec: timelapseIntervalSec, perLayer: timelapsePerLayer });
 });
 
 app.use(express.static(path.join(__dirname, 'public'), {
