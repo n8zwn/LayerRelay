@@ -1,0 +1,62 @@
+# Print-aware timelapse for LayerRelay — runs on the same Docker host as LayerRelay.
+# Build + run:  docker compose -f timelapse-compose.yml up -d --build
+# Finished MP4s land in the host folder you mount at /timelapses, and a
+# browse/download gallery is served at http://<host>:8088/.
+#
+# ONE-TIME on the host (so the non-root container can write the videos):
+#   sudo mkdir -p /opt/layerrelay/timelapses
+#   sudo chown -R 10001:10001 /opt/layerrelay/timelapses
+# If you're upgrading from an earlier (root) version, also drop the old scratch
+# volume so it's recreated with the right ownership:
+#   docker volume rm <stackname>_timelapse-frames    # e.g. timelapse_timelapse-frames
+
+services:
+  timelapse:
+    build:
+      context: .
+    image: layerrelay-timelapse:local
+    container_name: layerrelay-timelapse
+    restart: unless-stopped
+
+    # ---- Hardening --------------------------------------------------------
+    user: "10001:10001"          # non-root
+    read_only: true              # read-only root filesystem
+    tmpfs:
+      - /tmp                     # only writable scratch on the rootfs
+    cap_drop:
+      - ALL                      # the app needs no Linux capabilities
+    security_opt:
+      - no-new-privileges:true
+
+    # Browse/download the finished timelapses at http://<host>:8088/
+    ports:
+      - "0.0.0.0:8088:8088/tcp"
+
+    # Lets the container reach LayerRelay's published port on THIS host.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    environment:
+      LAYERRELAY_URL: "http://host.docker.internal:8787"   # only for /api/state (print detection)
+      CAPTURE_CHAMBER: "true"
+      CAPTURE_NOZZLE: "true"
+      # Capture sources. An rtsp:// URL is pulled directly with ffmpeg (one short
+      # connection per frame, so it never registers as an MJPEG subscriber on the
+      # relay/go2rtc). http(s):// snapshot URLs also work.
+      NOZZLE_SNAPSHOT_URL: "rtsp://192.168.1.150:8554/nozzle"   # go2rtc RTSP on the Pi
+      # Chamber from the printer's RTSP. Note this opens a second connection to the
+      # printer camera (LayerRelay already has one). If the Buddy board struggles,
+      # use LayerRelay's snapshot instead: "http://host.docker.internal:8787/api/camera.jpg"
+      CHAMBER_SNAPSHOT_URL: "rtsp://192.168.1.134/live"
+      INTERVAL_SEC: "10"
+      OUTPUT_FPS: "30"
+      KEEP_FRAMES: "false"
+      ALLOW_DELETE: "true"        # set "false" for a read-only gallery (no delete)
+
+    volumes:
+      # <-- change the left side to a real folder on your host (chowned to 10001):
+      - /opt/layerrelay/timelapses:/timelapses
+      - timelapse-frames:/frames   # scratch frames (auto-cleaned after render)
+
+volumes:
+  timelapse-frames:

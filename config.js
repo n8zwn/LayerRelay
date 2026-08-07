@@ -18,6 +18,9 @@ const DEFAULT_CONFIG = Object.freeze({
   printNameOverrides: {},
   localBgcodeDirs: [],
   cameraRtspUrl: '',
+  nozzleRtspUrl: '',
+  nozzlePipUrl: '',
+  timelapseUrl: '',
   useConnect: true,
 });
 
@@ -29,6 +32,8 @@ const ENV_OVERRIDES = Object.freeze({
   PRINTER_PASSWORD: ['password', 'secret'],
   CAMERA_RTSP_URL: ['cameraRtspUrl', 'string'],
   CAMERA_STREAM_ENABLED: ['cameraStreamEnabled', 'boolean'],
+  NOZZLE_RTSP_URL: ['nozzleRtspUrl', 'string'],
+  NOZZLE_STREAM_ENABLED: ['nozzleStreamEnabled', 'boolean'],
   SOURCE_CODE_URL: ['sourceCodeUrl', 'string'],
 });
 
@@ -42,6 +47,8 @@ const KNOWN_CONFIG_KEYS = new Set([
   'cameraStreamKillGraceMs', 'cameraStreamIdleMs', 'cameraStreamStallMs',
   'cameraStreamIoTimeoutMs', 'cameraStreamRestartBaseMs', 'cameraStreamRestartMaxMs',
   'cameraStreamMaxFrameBytes',
+  'nozzleRtspUrl', 'nozzleStreamEnabled', 'nozzleStreamFps', 'nozzleStreamWidth', 'nozzleStreamJpegQuality',
+  'timelapseUrl', 'nozzlePipUrl',
   'useConnect', 'connectPrinterUuid', 'connectPollMs', 'connectClientId', 'connectRefreshToken',
   'useNetatmo', 'netatmoClientId', 'netatmoClientSecret', 'netatmoRefreshToken', 'netatmoPollMs',
   'lastStateWriteMs', 'maxPrinterJsonBytes', 'maxPrinterResponseBytes',
@@ -64,6 +71,9 @@ const INTEGER_RANGES = Object.freeze({
   cameraStreamRestartBaseMs: [250, 30000],
   cameraStreamRestartMaxMs: [1000, 120000],
   cameraStreamMaxFrameBytes: [1024 * 1024, 64 * 1024 * 1024],
+  nozzleStreamFps: [1, 30],
+  nozzleStreamWidth: [320, 3840],
+  nozzleStreamJpegQuality: [2, 31],
   connectPollMs: [5000, Number.MAX_SAFE_INTEGER],
   netatmoPollMs: [60000, Number.MAX_SAFE_INTEGER],
   lastStateWriteMs: [5000, Number.MAX_SAFE_INTEGER],
@@ -72,12 +82,12 @@ const INTEGER_RANGES = Object.freeze({
 });
 
 const OPTIONAL_STRING_KEYS = Object.freeze([
-  '$schema', 'cameraRtspUrl', 'cameraFfmpegPath', 'connectPrinterUuid',
+  '$schema', 'cameraRtspUrl', 'nozzleRtspUrl', 'nozzlePipUrl', 'timelapseUrl', 'cameraFfmpegPath', 'connectPrinterUuid',
   'connectClientId', 'connectRefreshToken', 'netatmoClientId', 'netatmoClientSecret',
   'netatmoRefreshToken',
 ]);
 
-const OPTIONAL_BOOLEAN_KEYS = Object.freeze(['cameraStreamEnabled', 'useConnect', 'useNetatmo']);
+const OPTIONAL_BOOLEAN_KEYS = Object.freeze(['cameraStreamEnabled', 'nozzleStreamEnabled', 'useConnect', 'useNetatmo']);
 
 function firstEnvironmentValue(env, ...names) {
   for (const name of names) {
@@ -207,6 +217,39 @@ function validateConfig(config, { requirePrinter = true } = {}) {
     } catch {
       errors.push('cameraRtspUrl must be a valid RTSP URL');
     }
+  }
+  if (typeof config.nozzleRtspUrl === 'string' && config.nozzleRtspUrl !== config.nozzleRtspUrl.trim()) {
+    errors.push('nozzleRtspUrl must not have leading or trailing whitespace');
+  }
+  if (typeof config.nozzleRtspUrl === 'string' && config.nozzleRtspUrl) {
+    try {
+      const nozzleUrl = new URL(config.nozzleRtspUrl);
+      if (nozzleUrl.protocol !== 'rtsp:' && nozzleUrl.protocol !== 'rtsps:') {
+        errors.push('nozzleRtspUrl must use rtsp:// or rtsps://');
+      }
+    } catch {
+      errors.push('nozzleRtspUrl must be a valid RTSP URL');
+    }
+  }
+  if (typeof config.timelapseUrl === 'string' && config.timelapseUrl.trim() !== '') {
+    try {
+      const timelapseUrl = new URL(config.timelapseUrl);
+      if (!['http:', 'https:'].includes(timelapseUrl.protocol)) {
+        errors.push('timelapseUrl must use http:// or https://');
+      }
+    } catch {
+      errors.push('timelapseUrl must be a valid absolute URL');
+    }
+  }
+  if (typeof config.nozzlePipUrl === 'string' && config.nozzlePipUrl.trim() !== '') {
+    const nozzlePip = config.nozzlePipUrl.trim();
+    let nozzlePipOk = nozzlePip.startsWith('/');
+    if (!nozzlePipOk) {
+      try {
+        nozzlePipOk = ['http:', 'https:'].includes(new URL(nozzlePip).protocol);
+      } catch { nozzlePipOk = false; }
+    }
+    if (!nozzlePipOk) errors.push('nozzlePipUrl must be an http(s) URL or a path starting with /');
   }
   if (typeof config.cameraFfmpegPath === 'string' && !config.cameraFfmpegPath.trim()) {
     errors.push('cameraFfmpegPath must be a non-empty string');
