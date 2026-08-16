@@ -80,6 +80,7 @@
     "cameraStreamRestartBaseMs": { "type": "integer", "minimum": 250, "maximum": 30000, "default": 1000 },
     "cameraStreamRestartMaxMs": { "type": "integer", "minimum": 1000, "maximum": 120000, "default": 15000 },
     "cameraStreamMaxFrameBytes": { "type": "integer", "minimum": 1048576, "maximum": 67108864, "default": 16777216 },
+    "nozzleEnabled": { "type": "boolean", "default": true, "description": "Master switch for the nozzle camera. false hides the PiP, disables the relay, and skips nozzle timelapses. Can also be toggled live in the dashboard." },
     "nozzleRtspUrl": {
       "writeOnly": true,
       "default": "",

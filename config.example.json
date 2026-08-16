@@ -28,6 +28,7 @@
   "cameraStreamRestartBaseMs": 1000,
   "cameraStreamRestartMaxMs": 15000,
   "cameraStreamMaxFrameBytes": 16777216,
+  "nozzleEnabled": true,
   "nozzleRtspUrl": "",
   "nozzleStreamEnabled": false,
   "nozzleStreamFps": 15,
