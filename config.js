@@ -18,6 +18,7 @@ const DEFAULT_CONFIG = Object.freeze({
   printNameOverrides: {},
   localBgcodeDirs: [],
   cameraRtspUrl: '',
+  nozzleEnabled: true,
   nozzleRtspUrl: '',
   nozzlePipUrl: '',
   timelapseUrl: '',
@@ -47,7 +48,7 @@ const KNOWN_CONFIG_KEYS = new Set([
   'cameraStreamKillGraceMs', 'cameraStreamIdleMs', 'cameraStreamStallMs',
   'cameraStreamIoTimeoutMs', 'cameraStreamRestartBaseMs', 'cameraStreamRestartMaxMs',
   'cameraStreamMaxFrameBytes',
-  'nozzleRtspUrl', 'nozzleStreamEnabled', 'nozzleStreamFps', 'nozzleStreamWidth', 'nozzleStreamJpegQuality',
+  'nozzleEnabled', 'nozzleRtspUrl', 'nozzleStreamEnabled', 'nozzleStreamFps', 'nozzleStreamWidth', 'nozzleStreamJpegQuality',
   'timelapseUrl', 'nozzlePipUrl',
   'useConnect', 'connectPrinterUuid', 'connectPollMs', 'connectClientId', 'connectRefreshToken',
   'useNetatmo', 'netatmoClientId', 'netatmoClientSecret', 'netatmoRefreshToken', 'netatmoPollMs',
@@ -87,7 +88,7 @@ const OPTIONAL_STRING_KEYS = Object.freeze([
   'netatmoRefreshToken',
 ]);
 
-const OPTIONAL_BOOLEAN_KEYS = Object.freeze(['cameraStreamEnabled', 'nozzleStreamEnabled', 'useConnect', 'useNetatmo']);
+const OPTIONAL_BOOLEAN_KEYS = Object.freeze(['cameraStreamEnabled', 'nozzleEnabled', 'nozzleStreamEnabled', 'useConnect', 'useNetatmo']);
 
 function firstEnvironmentValue(env, ...names) {
   for (const name of names) {

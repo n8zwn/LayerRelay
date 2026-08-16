@@ -67,7 +67,7 @@ const cameraStream = new CameraStream(cfg);
 // fall back to the shared camera defaults inside CameraStream.
 function nozzleCameraConfig(config) {
   return {
-    cameraRtspUrl: config.nozzleRtspUrl,
+    cameraRtspUrl: config.nozzleEnabled === false ? '' : config.nozzleRtspUrl,
     cameraStreamEnabled: config.nozzleStreamEnabled,
     cameraStreamFps: config.nozzleStreamFps != null ? config.nozzleStreamFps : 15,
     cameraStreamWidth: config.nozzleStreamWidth != null ? config.nozzleStreamWidth : 640,
@@ -99,6 +99,12 @@ try {
   const savedTl = JSON.parse(fs.readFileSync(TIMELAPSE_INTERVAL_FILE, 'utf8'));
   if (savedTl && savedTl.intervalSec != null) timelapseIntervalSec = clampTimelapseInterval(savedTl.intervalSec);
 } catch { /* keep default */ }
+const NOZZLE_ENABLED_FILE = path.join(CACHE_DIR, 'nozzle-enabled.json');
+let nozzleEnabled = cfg.nozzleEnabled !== false;
+try {
+  const savedNozzle = JSON.parse(fs.readFileSync(NOZZLE_ENABLED_FILE, 'utf8'));
+  if (savedNozzle && typeof savedNozzle.enabled === 'boolean') nozzleEnabled = savedNozzle.enabled;
+} catch { /* keep config default */ }
 const toolSettingsStore = createToolSettingsStore({
   dataFile: path.join(CACHE_DIR, 'tool-settings.json'),
   defaults: { toolCount: cfg.toolCount, toolSlots: cfg.toolSlots },
@@ -998,7 +1004,7 @@ function exposeCompletedThumbnail(value) {
 // When the nozzle PiP streams directly from another origin (e.g. go2rtc), that
 // origin must be allowed in the CSP or the browser blocks the <img>.
 const nozzleOrigin = (() => {
-  const u = cfg.nozzlePipUrl;
+  const u = cfg.nozzleEnabled === false ? '' : cfg.nozzlePipUrl;
   if (typeof u === 'string' && /^https?:\/\//.test(u)) {
     try { return new URL(u).origin; } catch { return ''; }
   }
@@ -1176,7 +1182,9 @@ app.get('/api/state', (_req, res) => {
     camera: cameraStream.getStatus(),
     nozzle: nozzleStream.getStatus(),
     timelapseUrl: cfg.timelapseUrl || null,
-    nozzlePipUrl: cfg.nozzlePipUrl || null,
+    nozzleEnabled,
+    nozzleConfigured: !!(cfg.nozzlePipUrl || cfg.nozzleRtspUrl),
+    nozzlePipUrl: nozzleEnabled ? (cfg.nozzlePipUrl || null) : null,
     timelapseIntervalSec,
     // Ambient room/outdoor readings from the Netatmo station (null when not configured).
     roomTemp: netatmoLive ? netatmoLive.roomTemp : null,
@@ -1227,6 +1235,20 @@ app.put('/api/settings/timelapse', sameOriginSettingsWrite, (req, res) => {
     return res.status(500).json({ error: 'could not save timelapse interval' });
   }
   return res.json({ intervalSec: n });
+});
+
+app.put('/api/settings/nozzle', sameOriginSettingsWrite, (req, res) => {
+  const enabled = (req.body || {}).enabled;
+  if (typeof enabled !== 'boolean') {
+    return res.status(400).json({ error: 'enabled must be a boolean' });
+  }
+  nozzleEnabled = enabled;
+  try {
+    writeJsonAtomic(NOZZLE_ENABLED_FILE, { enabled: nozzleEnabled });
+  } catch {
+    return res.status(500).json({ error: 'could not save nozzle setting' });
+  }
+  return res.json({ enabled: nozzleEnabled });
 });
 
 app.use(express.static(path.join(__dirname, 'public'), {

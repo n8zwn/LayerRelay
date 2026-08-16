@@ -157,6 +157,7 @@ linked product photos, package data, properties, or purchase URLs. See
 | `cameraStreamRestartBaseMs` | integer 250–30000, `1000` | Non-secret | `1000` | Initial retry backoff. |
 | `cameraStreamRestartMaxMs` | integer 1000–120000, `15000` | Non-secret | `15000` | Maximum retry backoff. |
 | `cameraStreamMaxFrameBytes` | integer 1048576–67108864, `16777216` | Non-secret | `16777216` | Safety cap for one JPEG frame. |
+| `nozzleEnabled` | boolean, `true` | Non-secret | `false` | Master switch for the nozzle camera; also toggleable live in the dashboard. `false` hides the PiP, disables the relay, and skips nozzle timelapses. |
 | `nozzleRtspUrl` | empty or RTSP(S) URL, empty | Private; secret if credential-bearing | `""` | Optional secondary (nozzle) RTSP source. Same handling as `cameraRtspUrl`; served at `/api/nozzle.mjpeg` and `/api/nozzle.jpg`. |
 | `nozzleStreamEnabled` | boolean, automatic | Non-secret | `false` | A non-empty `nozzleRtspUrl` enables the nozzle relay when omitted; `false` disables it. |
 | `nozzleStreamFps` | integer 1–30, `15` | Non-secret | `15` | Nozzle MJPEG output frame rate. |

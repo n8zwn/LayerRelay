@@ -1,0 +1,86 @@
+{
+  "$schema": "./config.schema.json",
+  "useConnect": true,
+  "connectPrinterUuid": "08159440-a352-42bd-b79c-139db71cc008",
+  "connectClientId": "",
+  "connectRefreshToken": "eyJhbGciOiJSUzI1NiIsImtpZCI6IkhTSU53OXQzalhZd0lGaUcxNWVleW1BNlJscFFwVW5veTFrOG0wTW4yM0EiLCJ0eXAiOiJKV1QifQ.eyJqdGkiOiI3NDA0ZGMzODdhNzc0YTQ1OTJjNDhhODYyODY3MDc0NSIsInN1YiI6IjY2NjI1NCIsImV4cCI6MTc4NzM2NDIyMy41MzEwNTIsInNpZCI6IjI0M2FhYmNjLTJiMTMtNDQzYi05MGQyLThlODMwZGU1MDgzZCIsImFwcCI6ImNvbm5lY3QiLCJ0eXBlIjoicmVmcmVzaCJ9.Glhiy1SiKXmRlMYu6d2NFX6WeuwL4JgActZyYD1P4-l6LmISvW4VPPdjqlDHoX7FnHyTIAyvNZGOF_mWvLPM0lefURtDqbPtKLuRZcZE4DO3SN5BHsjpHcPVEiYcIaC2MaQgF313apy5X4cSraU3_SouRaPg8N4Sf4BU_dC-XiAt9fxxTETxPct_wKzcfADmLZ1c9958leJ--cyVcNudZGDX-StDIJ9KV6HFm5xXnB81PHuIvxociPalrW8MF6Pty2w3pVuCwisN9Q6iqQ8fkyNifBXVEnBz77X00ZvHrdXzPFxLxgeV4h5-XYwWdA7FbRW1NpupuEOM1SesqMeZLA",
+  "connectPollMs": 5000,
+  "listenHost": "127.0.0.1",
+  "port": 8787,
+  "sourceCodeUrl": "https://github.com/GoByeBye/LayerRelay",
+  "pollIntervalMs": 2000,
+  "analysisCacheMaxEntries": 100,
+  "analysisCacheMaxBytes": 67108864,
+  "printNameOverrides": {},
+  "toolCount": 8,
+  "toolSlots": {
+    "1": {
+      "loaded": true,
+      "name": "Polymaker PLA Pro",
+      "color": "#0c0e0c"
+    },
+    "2": {
+      "loaded": true,
+      "name": "Polymaker PLA Pro",
+      "color": "#F3aa01"
+    },
+    "3": {
+      "loaded": true,
+      "name": "Overture PLA+",
+      "color": "#FFFFFF"
+    },
+    "4": {
+      "loaded": true,
+      "name": "Polymake PLA Pro",
+      "color": "#660066"
+    },
+    "5": {
+      "loaded": true,
+      "name": "Overture PLA+",
+      "color": "#FF0000"
+    },
+    "6": {
+      "loaded": true,
+      "name": "Polymaker PLA Pro",
+      "color": "#2d9e59"
+    },
+    "7": {
+      "loaded": true,
+      "name": "3D Fuel Pro PCTG",
+      "color": "#000000"
+    },
+    "8": {
+      "loaded": true,
+      "name": "Overture PETG",
+      "color": "#FFFFFF"
+    }
+  },
+  "localBgcodeDirs": [],
+  "cameraRtspUrl": "rtsp://192.168.1.134/live",
+  "cameraStreamEnabled": true,
+  "cameraFfmpegPath": "ffmpeg",
+  "cameraStreamFps": 24,
+  "cameraStreamWidth": 1920,
+  "cameraStreamJpegQuality": 5,
+  "cameraStreamThreads": 4,
+  "cameraStreamKillGraceMs": 3000,
+  "cameraStreamIdleMs": 10000,
+  "cameraStreamStallMs": 20000,
+  "cameraStreamIoTimeoutMs": 15000,
+  "cameraStreamRestartBaseMs": 1000,
+  "cameraStreamRestartMaxMs": 15000,
+  "cameraStreamMaxFrameBytes": 16777216,
+  "useConnect": true,
+  "connectPrinterUuid": "",
+  "connectClientId": "",
+  "connectPollMs": 5000,
+  "connectRefreshToken": "",
+  "useNetatmo": false,
+  "netatmoClientId": "",
+  "netatmoClientSecret": "",
+  "netatmoRefreshToken": "",
+  "netatmoPollMs": 300000,
+  "lastStateWriteMs": 10000,
+  "maxPrinterJsonBytes": 1048576,
+  "maxPrinterResponseBytes": 536870912
+}

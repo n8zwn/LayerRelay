@@ -69,3 +69,8 @@ test('accepts a browser-facing nozzlePipUrl and rejects a bad one', () => {
   assert.equal(validateConfig({ ...base, nozzlePipUrl: '/api/nozzle.mjpeg' }).nozzlePipUrl, '/api/nozzle.mjpeg');
   assert.throws(() => validateConfig({ ...base, nozzlePipUrl: 'rtsp://x/y' }), /nozzlePipUrl/);
 });
+
+test('accepts the nozzleEnabled master switch and rejects a non-boolean', () => {
+  assert.equal(validateConfig({ ...base, nozzleEnabled: false }).nozzleEnabled, false);
+  assert.throws(() => validateConfig({ ...base, nozzleEnabled: 'no' }), /nozzleEnabled must be true or false/);
+});
