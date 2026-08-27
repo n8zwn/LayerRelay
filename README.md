@@ -4,6 +4,16 @@
 
 # LayerRelay — Prusa printer monitoring dashboard
 
+> **Fork notice.** This is [n8zwn](https://github.com/n8zwn/LayerRelay)'s fork
+> of [LayerRelay by GoByeBye](https://github.com/GoByeBye/LayerRelay). On top of
+> upstream it adds an optional second **nozzle camera** shown as a draggable,
+> low-latency picture-in-picture in the overlay, a **nozzle on/off master switch**
+> in the dashboard controls, a **per-layer timelapse** toggle, and a companion
+> **print-aware timelapse service** that captures and auto-renders both cameras.
+> Everything else tracks upstream. Same license as upstream
+> (AGPL-3.0-or-later); original credit and third-party notices are unchanged in
+> [LICENSE](LICENSE) and [NOTICE.md](NOTICE.md).
+
 A self-hosted monitoring dashboard for Prusa printers, with an optional OBS
 browser overlay. LayerRelay combines a printer camera feed, local PrusaLink
 telemetry, recommended Prusa Connect telemetry, decoded `.bgcode` timelines,
@@ -69,7 +79,7 @@ refresh token, which may carry broader account permissions; see the
 Clone the repository and enter its directory first:
 
 ```sh
-git clone https://github.com/GoByeBye/LayerRelay.git
+git clone https://github.com/n8zwn/LayerRelay.git
 cd LayerRelay
 ```
 

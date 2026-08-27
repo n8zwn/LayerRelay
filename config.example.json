@@ -5,7 +5,7 @@
   "password": "replace-with-your-prusalink-password",
   "listenHost": "127.0.0.1",
   "port": 8787,
-  "sourceCodeUrl": "https://github.com/GoByeBye/LayerRelay",
+  "sourceCodeUrl": "https://github.com/n8zwn/LayerRelay",
   "pollIntervalMs": 2000,
   "analysisCacheMaxEntries": 100,
   "analysisCacheMaxBytes": 67108864,

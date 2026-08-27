@@ -6,11 +6,11 @@
   "license": "AGPL-3.0-or-later",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/GoByeBye/LayerRelay.git"
+    "url": "git+https://github.com/n8zwn/LayerRelay.git"
   },
-  "homepage": "https://github.com/GoByeBye/LayerRelay#readme",
+  "homepage": "https://github.com/n8zwn/LayerRelay#readme",
   "bugs": {
-    "url": "https://github.com/GoByeBye/LayerRelay/issues"
+    "url": "https://github.com/n8zwn/LayerRelay/issues"
   },
   "keywords": [
     "3d-printing",
