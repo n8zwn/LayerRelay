@@ -22,10 +22,13 @@ Key env vars (all optional except LAYERRELAY_URL in practice):
   FRAMES_DIR            scratch frame storage (default /frames)
   KEEP_FRAMES           keep raw frames after rendering (default false)
   MIN_FRAMES            don't render segments shorter than this (default 8)
+  IDLE_GRACE_SEC        keep one print in a single file: how long the printer must be
+                        continuously non-printing before the timelapse is finished, so
+                        tool changes / busy states don't split it (default 90)
   STATE_FIELD           dotted path to the printer state string (default state)
   PRINTING_REGEX        regex marking an active print (default (?i)print)
   PROGRESS_FIELD        dotted path to progress, used as a fallback (default progress)
-  JOB_ID_FIELDS         comma list of fields to identify a job (default jobKey,thumbnailKey,name)
+  JOB_ID_FIELDS         comma list of stable fields identifying a job (default jobKey,thumbnailKey)
   DEBUG                 log detection each poll (default true)
 """
 import os
@@ -63,15 +66,35 @@ OUTPUT_DIR = env("OUTPUT_DIR", "/timelapses")
 FRAMES_DIR = env("FRAMES_DIR", "/frames")
 KEEP_FRAMES = env_bool("KEEP_FRAMES", False)
 MIN_FRAMES = int(env("MIN_FRAMES", "8"))
+# One print = one file. When a print stops being detected we do NOT render right
+# away, because on a toolchanger the state flaps to BUSY during every tool change
+# and the print can be paused for hours. Instead we keep the single open timelapse
+# alive while the same job is loaded or the printer is in a hold/pause/busy state,
+# and only finalize when the job actually changes or the printer reaches a
+# finished/idle state (sustained for IDLE_GRACE_SEC).
+IDLE_GRACE_SEC = float(env("IDLE_GRACE_SEC", "90"))
+HOLD_REGEX = re.compile(env(
+    "HOLD_REGEX",
+    r"(?i)(paus|busy|tool|change|calibrat|mesh|level|home|load|unload|purg|heat|cool|attention|prepar|resum)"))
+FINISHED_REGEX = re.compile(env(
+    "FINISHED_REGEX",
+    r"(?i)(finish|ready|idle|operational|cancel|stopp|abort|complete)"))
 STATE_FIELD = env("STATE_FIELD", "state")
 PRINTING_REGEX = re.compile(env("PRINTING_REGEX", "(?i)print"))
 PROGRESS_FIELD = env("PROGRESS_FIELD", "progress")
-JOB_ID_FIELDS = [f.strip() for f in env("JOB_ID_FIELDS", "jobKey,thumbnailKey,name").split(",") if f.strip()]
+# Stable per-print identity for splitting files. Deliberately NOT the print name
+# (a name can change mid-print and is shared by reprints); use the job key.
+JOB_ID_FIELDS = [f.strip() for f in env("JOB_ID_FIELDS", "jobKey,thumbnailKey").split(",") if f.strip()]
 NAME_FIELD = env("NAME_FIELD", "name")   # friendly print name, used in the filename
 WEB_PORT = int(env("WEB_PORT", "8088"))  # browse/download gallery port (0 to disable)
 ALLOW_DELETE = env_bool("ALLOW_DELETE", True)  # allow deleting timelapses from the page
 DEBUG = env_bool("DEBUG", True)
 INTERVAL_FIELD = env("TIMELAPSE_INTERVAL_FIELD", "timelapseIntervalSec")  # from /api/state
+PERLAYER_FIELD = env("TIMELAPSE_PERLAYER_FIELD", "timelapsePerLayer")     # from /api/state
+LAYER_FIELD = env("LAYER_FIELD", "currentLayer")                          # from /api/state
+LAYER_POLL_SEC = float(env("LAYER_POLL_SEC", "2"))     # how often to check the layer in per-layer mode
+LAYER_SETTLE_MS = int(env("LAYER_SETTLE_MS", "0"))     # wait after a layer change before capturing (park+dwell trick)
+NOZZLE_ENABLED_FIELD = env("NOZZLE_ENABLED_FIELD", "nozzleEnabled")  # from /api/state; false = skip nozzle
 
 CAMERAS = {}
 if env_bool("CAPTURE_CHAMBER", True):
@@ -170,6 +193,7 @@ class Segment:
         # Friendly print name for the filename; fall back to the job id or "print".
         self.name = name or (self._safe(job_id) if job_id else None) or "print"
         self.name_final = bool(name)   # False until a real print name is seen
+        self.last_layer = None         # last captured layer (per-layer mode)
         self.stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         self.dirs = {}
         self.counts = {}
@@ -183,8 +207,10 @@ class Segment:
     def _safe(s):
         return re.sub(r"[^A-Za-z0-9._-]+", "_", str(s))[:40]
 
-    def capture(self):
+    def capture(self, cams=None):
         for cam, url in CAMERAS.items():
+            if cams is not None and cam not in cams:
+                continue
             data = grab_frame(url)
             if not data or len(data) < 100:
                 if DEBUG:
@@ -440,6 +466,7 @@ def main():
         log("no cameras enabled; set CAPTURE_CHAMBER/CAPTURE_NOZZLE"); return
 
     global segment
+    idle_since = None   # monotonic time the printer first looked finished/idle
     while True:
         try:
             state = fetch_json(LAYERRELAY_URL + "/api/state")
@@ -448,12 +475,17 @@ def main():
             time.sleep(min(INTERVAL, 5))
             continue
 
-        # Interval can be set live from the LayerRelay overlay slider (1-20s);
-        # fall back to INTERVAL_SEC when the field isn't present.
+        # Per-layer mode (overlay checkbox) captures one frame per layer change and
+        # ignores the interval. Otherwise the interval (overlay slider, 1-20s) applies,
+        # falling back to INTERVAL_SEC.
+        per_layer = bool(dotted(state, PERLAYER_FIELD))
         eff_interval = INTERVAL
         iv = dotted(state, INTERVAL_FIELD)
         if isinstance(iv, (int, float)) and 1 <= iv <= 20:
             eff_interval = float(iv)
+        active = set(CAMERAS)
+        if "nozzle" in active and dotted(state, NOZZLE_ENABLED_FIELD) is False:
+            active.discard("nozzle")
         printing, detail = detect_printing(state)
         job_id = detect_job_id(state) or "job"
         job_name = detect_job_name(state)
@@ -463,23 +495,58 @@ def main():
                 % (detail, printing, job_id, (segment.counts if segment else {})))
 
         if printing:
+            idle_since = None   # actively printing -> cancel any pending finalize
             if segment is None:
                 log("print started (job=%s); capturing" % job_id)
                 segment = Segment(job_id, job_name)
             elif segment.job_id != job_id and job_id != "job":
-                log("new job detected; rendering previous then starting new")
+                log("new job detected (job=%s); rendering previous then starting new" % job_id)
                 finish_segment()
                 segment = Segment(job_id, job_name)
             # Adopt the friendly print name if it only appeared after the print began.
             if job_name and not segment.name_final:
                 segment.name = job_name
                 segment.name_final = True
-            segment.capture()
-        else:
-            if segment is not None:
-                finish_segment()
+            if per_layer:
+                layer = dotted(state, LAYER_FIELD)
+                if isinstance(layer, (int, float)):
+                    layer = int(layer)
+                    if segment.last_layer is None or layer > segment.last_layer:
+                        if LAYER_SETTLE_MS > 0:
+                            time.sleep(LAYER_SETTLE_MS / 1000.0)
+                        segment.capture(active)
+                        segment.last_layer = layer
+                elif DEBUG:
+                    log("per-layer mode but no '%s' in /api/state yet" % LAYER_FIELD)
+            else:
+                segment.capture(active)
+        elif segment is not None:
+            # Not printing right now, but a timelapse is open. Decide whether this is
+            # a transient gap (tool change / pause / busy) that should stay in the
+            # SAME file, or a real end-of-print that should finalize it.
+            s = detail or ""
+            same_job = (job_id != "job" and job_id == segment.job_id)
+            if FINISHED_REGEX.search(s):
+                looks_finished = True          # explicit finished/idle/cancelled state
+            elif HOLD_REGEX.search(s) or same_job:
+                looks_finished = False         # pause / busy / tool change / job still loaded
+            else:
+                looks_finished = True          # unknown non-print state with no job loaded
+            if not looks_finished:
+                if idle_since is not None:
+                    log("print resumed activity (state=%r); keeping one file" % s)
+                idle_since = None
+            else:
+                now = time.monotonic()
+                if idle_since is None:
+                    idle_since = now
+                    log("print looks finished (state=%r); finalizing in %ss unless it resumes"
+                        % (s, int(IDLE_GRACE_SEC)))
+                elif now - idle_since >= IDLE_GRACE_SEC:
+                    finish_segment()
+                    idle_since = None
 
-        time.sleep(eff_interval)
+        time.sleep(LAYER_POLL_SEC if per_layer else eff_interval)
 
 
 if __name__ == "__main__":

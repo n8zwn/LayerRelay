@@ -67,10 +67,47 @@ timelapse: state='PRINTING' printing=True job=benchy.bgcode frames={'chamber': 4
 | `ALLOW_DELETE` | show a Delete button on each card and allow deleting from the page | true |
 | `KEEP_FRAMES` | keep raw JPEGs after rendering | false |
 | `MIN_FRAMES` | skip rendering very short segments | 8 |
+| `IDLE_GRACE_SEC` | one print = one file: how long the printer must stay continuously finished/idle before the timelapse is rendered, so tool changes and pauses don't split it | 90 |
+| `HOLD_REGEX` | printer states that keep the current print in a single file (pause, busy, tool change, calibration, heating, filament, attention). While the state matches this, the timelapse is never finalized | see script |
+| `FINISHED_REGEX` | printer states that mean the print is over (finished, ready, idle, cancelled). Matching this starts the `IDLE_GRACE_SEC` countdown to render | see script |
+| `LAYER_SETTLE_MS` | in per-layer mode, wait this long after a layer change before grabbing the frame (for the slicer park trick below) | 0 |
 
 Rule of thumb: video length ≈ (print_minutes × 60 ÷ `INTERVAL_SEC`) ÷ `OUTPUT_FPS`
 seconds. A 3-hour print at 10s interval, 30fps ≈ 36s clip. Longer interval =
 shorter, choppier clip; shorter interval = smoother but bigger.
+
+## Per-layer capture
+
+Tick **Capture one frame per layer** in the LayerRelay dashboard controls to grab
+exactly one frame each time the layer changes (read from `currentLayer` in
+`/api/state`) instead of on a timer. The interval slider is disabled while it's on.
+This gives the classic smooth "object grows" look and needs nothing extra from the
+printer.
+
+The toolhead will be wherever it happens to be in each frame. There's no clean way
+to *park* it first on a CORE One (LayerRelay is read-only and can't move the
+printer), but you can approximate it from the slicer. In PrusaSlicer → Printer
+Settings → Custom G-code → **After layer change G-code**, park the head and dwell:
+
+```gcode
+; stabilized-timelapse park (tune position/retract for your printer)
+G91
+G1 E-0.6 F2100        ; small retract to limit ooze
+G1 Z0.4 F600          ; hop
+G90
+G1 X2 Y2 F9000        ; park in a corner
+G4 P3500              ; dwell ~3.5s so the head is still parked when the frame lands
+G1 E0.6 F2100         ; unretract
+```
+
+Keep the dwell **longer** than the capture latency: `currentLayer` only updates on
+LayerRelay's poll (~2s), so the head has to stay parked long enough for the
+companion to notice the layer change and grab the frame while it's there.
+`LAYER_SETTLE_MS` adds a delay after the change if you need to nudge the timing.
+
+Honest caveat: this adds time to every layer, can leave a small blob at the park
+point, and the timing is best-effort — a decent approximation, not true
+OctoLapse-grade stabilization.
 
 ## Notes
 
@@ -79,6 +116,9 @@ shorter, choppier clip; shorter interval = smoother but bigger.
 - Nozzle timelapses need either the nozzle fork (`/api/nozzle.jpg`) or a
   `NOZZLE_SNAPSHOT_URL` pointing at go2rtc. If neither is reachable, nozzle
   frames are just skipped and you still get the chamber timelapse.
+- If you toggle the nozzle camera off in the LayerRelay dashboard, the companion
+  automatically stops capturing nozzle frames (it reads `nozzleEnabled` from
+  `/api/state`); chamber capture is unaffected.
 - This is a time-based timelapse. A true "printhead disappears" OctoLapse effect
   needs the printer to park the head each layer, which LayerRelay can't do (it's
   read-only by design).
