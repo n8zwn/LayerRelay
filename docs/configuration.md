@@ -46,6 +46,8 @@ still reveal deployment details.
 | `NOZZLE_RTSP_URL` | `nozzleRtspUrl` | RTSP(S) URL, empty | Private; secret if credential-bearing | `rtsp://192.0.2.20:8554/nozzle` | Optional secondary nozzle camera source, relayed to `/api/nozzle.mjpeg`. |
 | `NOZZLE_STREAM_ENABLED` | `nozzleStreamEnabled` | boolean, automatic | Non-secret | `false` | Nozzle relay override (`true`/`false`, `1`/`0`, `yes`/`no`). |
 | `SOURCE_CODE_URL` | `sourceCodeUrl` | HTTP(S) URL, project repository | Public | `https://github.com/GoByeBye/LayerRelay` | Corresponding source offered to remote users. Modified deployments must use their exact source revision. |
+| `WLED_ENABLED` | `wledEnabled` | boolean, `false` | Non-secret | `true` | Master switch for WLED status lighting (`true`/`false`, `1`/`0`, `yes`/`no`). |
+| `WLED_HOST` | `wledHost` | hostname/IP, empty | Deployment detail | `192.168.1.60` | WLED controller address, without a URL scheme. |
 
 Every override also accepts a `LAYER_RELAY_` prefix, for example
 `LAYER_RELAY_CONFIG` and `LAYER_RELAY_PORT`. Environment-only deployments are
@@ -165,6 +167,37 @@ linked product photos, package data, properties, or purchase URLs. See
 | `nozzleStreamJpegQuality` | integer 2–31, `6` | Non-secret | `6` | Nozzle FFmpeg JPEG quality scale; lower is higher quality. |
 | `nozzlePipUrl` | empty, HTTP(S) URL, or path, empty | Deployment detail | `http://192.0.2.20:1984/api/stream.mjpeg?src=nozzle` | Browser-facing nozzle stream for the PiP, bypassing LayerRelay's relay for low latency. When set, the PiP shows even if the server-side nozzle relay is off. |
 | `timelapseUrl` | empty or HTTP(S) URL, empty | Deployment detail | `http://192.0.2.50:8088/` | Optional link to a timelapse gallery, shown in the dashboard controls. |
+
+## WLED status lighting
+
+Optional. When enabled and a `wledHost` is set, LayerRelay pushes a colour (or a
+WLED preset) to the strip via the WLED JSON API (`POST /json/state`) whenever the
+printer state changes: idle, printing (or paused), error/attention, and a
+temporary success colour for `wledSuccessHoldSec` after a print finishes. Effects,
+palettes, and segment layout are configured in WLED itself; LayerRelay only sets
+the per-state colour/brightness/power or activates a preset. Everything below is
+also editable live from the dashboard controls.
+
+| Setting | Type and default | Sensitivity | Example | Purpose |
+|---|---|---|---|---|
+| `wledEnabled` | boolean, `false` | Non-secret | `true` | Master switch for WLED status lighting. Also toggleable in the dashboard. |
+| `wledHost` | hostname/IP, empty | Deployment detail | `192.168.1.60` | WLED controller address, no scheme. Reached over plain HTTP on the LAN. |
+| `wledBrightness` | integer 0–255, `128` | Non-secret | `160` | Brightness for the colour path. Presets carry their own brightness. |
+| `wledTransitionMs` | integer 0–10000, `400` | Non-secret | `700` | Crossfade time between states, in milliseconds. |
+| `wledSuccessHoldSec` | integer 0–86400, `300` | Non-secret | `600` | Seconds the success colour holds after a finish before reverting to idle. |
+| `wledIdleColor` | hex colour, `#101010` | Non-secret | `#101010` | Colour when idle. |
+| `wledPrintingColor` | hex colour, `#1030ff` | Non-secret | `#1030ff` | Colour while printing/paused. |
+| `wledErrorColor` | hex colour, `#ff0000` | Non-secret | `#ff0000` | Colour on error/attention. |
+| `wledSuccessColor` | hex colour, `#00ff00` | Non-secret | `#00ff00` | Colour shown after a successful finish. |
+| `wledIdlePreset` | integer 0–250, `0` | Non-secret | `0` | Optional WLED preset ID for idle. `0` uses the colour; 1–250 activates that preset. |
+| `wledPrintingPreset` | integer 0–250, `0` | Non-secret | `0` | Optional WLED preset ID for printing. `0` uses the colour. |
+| `wledErrorPreset` | integer 0–250, `0` | Non-secret | `0` | Optional WLED preset ID for error. `0` uses the colour. |
+| `wledSuccessPreset` | integer 0–250, `0` | Non-secret | `3` | Optional WLED preset ID for success. `0` uses the colour; other values activate that preset (own colour/effect/brightness). |
+
+`WLED_ENABLED` and `WLED_HOST` are also available as environment overrides for
+container deployments. LayerRelay writes only to WLED's JSON state endpoint and
+never reads or stores anything from it; the strip is a separate device you
+control, so this stays outside LayerRelay's read-only printer boundary.
 
 ## Cloud integrations
 

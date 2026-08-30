@@ -23,6 +23,22 @@ const DEFAULT_CONFIG = Object.freeze({
   nozzlePipUrl: '',
   timelapseUrl: '',
   useConnect: true,
+  // WLED status lighting (optional). LayerRelay pushes a colour (or a WLED preset)
+  // per printer state via the WLED JSON API. Everything else (effects, palettes)
+  // is configured in WLED itself.
+  wledEnabled: false,
+  wledHost: '',
+  wledBrightness: 128,
+  wledTransitionMs: 400,
+  wledSuccessHoldSec: 300,
+  wledIdleColor: '#101010',
+  wledPrintingColor: '#1030ff',
+  wledErrorColor: '#ff0000',
+  wledSuccessColor: '#00ff00',
+  wledIdlePreset: 0,
+  wledPrintingPreset: 0,
+  wledErrorPreset: 0,
+  wledSuccessPreset: 0,
 });
 
 const ENV_OVERRIDES = Object.freeze({
@@ -36,6 +52,8 @@ const ENV_OVERRIDES = Object.freeze({
   NOZZLE_RTSP_URL: ['nozzleRtspUrl', 'string'],
   NOZZLE_STREAM_ENABLED: ['nozzleStreamEnabled', 'boolean'],
   SOURCE_CODE_URL: ['sourceCodeUrl', 'string'],
+  WLED_ENABLED: ['wledEnabled', 'boolean'],
+  WLED_HOST: ['wledHost', 'string'],
 });
 
 const KNOWN_CONFIG_KEYS = new Set([
@@ -50,6 +68,9 @@ const KNOWN_CONFIG_KEYS = new Set([
   'cameraStreamMaxFrameBytes',
   'nozzleEnabled', 'nozzleRtspUrl', 'nozzleStreamEnabled', 'nozzleStreamFps', 'nozzleStreamWidth', 'nozzleStreamJpegQuality',
   'timelapseUrl', 'nozzlePipUrl',
+  'wledEnabled', 'wledHost', 'wledBrightness', 'wledTransitionMs', 'wledSuccessHoldSec',
+  'wledIdleColor', 'wledPrintingColor', 'wledErrorColor', 'wledSuccessColor',
+  'wledIdlePreset', 'wledPrintingPreset', 'wledErrorPreset', 'wledSuccessPreset',
   'useConnect', 'connectPrinterUuid', 'connectPollMs', 'connectClientId', 'connectRefreshToken',
   'useNetatmo', 'netatmoClientId', 'netatmoClientSecret', 'netatmoRefreshToken', 'netatmoPollMs',
   'lastStateWriteMs', 'maxPrinterJsonBytes', 'maxPrinterResponseBytes',
@@ -75,6 +96,13 @@ const INTEGER_RANGES = Object.freeze({
   nozzleStreamFps: [1, 30],
   nozzleStreamWidth: [320, 3840],
   nozzleStreamJpegQuality: [2, 31],
+  wledBrightness: [0, 255],
+  wledTransitionMs: [0, 10000],
+  wledSuccessHoldSec: [0, 86400],
+  wledIdlePreset: [0, 250],
+  wledPrintingPreset: [0, 250],
+  wledErrorPreset: [0, 250],
+  wledSuccessPreset: [0, 250],
   connectPollMs: [5000, Number.MAX_SAFE_INTEGER],
   netatmoPollMs: [60000, Number.MAX_SAFE_INTEGER],
   lastStateWriteMs: [5000, Number.MAX_SAFE_INTEGER],
@@ -85,10 +113,12 @@ const INTEGER_RANGES = Object.freeze({
 const OPTIONAL_STRING_KEYS = Object.freeze([
   '$schema', 'cameraRtspUrl', 'nozzleRtspUrl', 'nozzlePipUrl', 'timelapseUrl', 'cameraFfmpegPath', 'connectPrinterUuid',
   'connectClientId', 'connectRefreshToken', 'netatmoClientId', 'netatmoClientSecret',
-  'netatmoRefreshToken',
+  'netatmoRefreshToken', 'wledHost',
 ]);
 
-const OPTIONAL_BOOLEAN_KEYS = Object.freeze(['cameraStreamEnabled', 'nozzleEnabled', 'nozzleStreamEnabled', 'useConnect', 'useNetatmo']);
+const OPTIONAL_BOOLEAN_KEYS = Object.freeze(['cameraStreamEnabled', 'nozzleEnabled', 'nozzleStreamEnabled', 'useConnect', 'useNetatmo', 'wledEnabled']);
+
+const WLED_COLOR_KEYS = Object.freeze(['wledIdleColor', 'wledPrintingColor', 'wledErrorColor', 'wledSuccessColor']);
 
 function firstEnvironmentValue(env, ...names) {
   for (const name of names) {
@@ -339,6 +369,17 @@ function validateConfig(config, { requirePrinter = true } = {}) {
       errors.push('printNameOverrides must be an object');
     } else if (Object.values(config.printNameOverrides).some((value) => typeof value !== 'string' || value.length > 200)) {
       errors.push('printNameOverrides values must be strings of at most 200 characters');
+    }
+  }
+  for (const key of WLED_COLOR_KEYS) {
+    if (config[key] != null && (typeof config[key] !== 'string' || !/^#[0-9a-f]{6}$/i.test(config[key]))) {
+      errors.push(`${key} must be a six-digit hex colour like #1030ff`);
+    }
+  }
+  if (config.wledHost != null && typeof config.wledHost === 'string' && config.wledHost.trim() !== '') {
+    const host = config.wledHost;
+    if (host !== host.trim() || /\s/.test(host) || host.includes('://') || /[/?#@]/.test(host)) {
+      errors.push('wledHost must be a hostname or IP address without a scheme, path, or whitespace');
     }
   }
   if (errors.length) throw new Error(`Invalid configuration:\n- ${errors.join('\n- ')}`);

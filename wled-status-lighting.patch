@@ -1,0 +1,738 @@
+diff --git a/config.example.json b/config.example.json
+index e2606a9..ae4864b 100644
+--- a/config.example.json
++++ b/config.example.json
+@@ -36,6 +36,19 @@
+   "nozzleStreamJpegQuality": 6,
+   "nozzlePipUrl": "",
+   "timelapseUrl": "",
++  "wledEnabled": false,
++  "wledHost": "",
++  "wledBrightness": 128,
++  "wledTransitionMs": 400,
++  "wledSuccessHoldSec": 300,
++  "wledIdleColor": "#101010",
++  "wledPrintingColor": "#1030ff",
++  "wledErrorColor": "#ff0000",
++  "wledSuccessColor": "#00ff00",
++  "wledIdlePreset": 0,
++  "wledPrintingPreset": 0,
++  "wledErrorPreset": 0,
++  "wledSuccessPreset": 0,
+   "useConnect": true,
+   "connectPrinterUuid": "",
+   "connectClientId": "",
+diff --git a/config.js b/config.js
+index cc27f34..7623b44 100644
+--- a/config.js
++++ b/config.js
+@@ -23,6 +23,22 @@ const DEFAULT_CONFIG = Object.freeze({
+   nozzlePipUrl: '',
+   timelapseUrl: '',
+   useConnect: true,
++  // WLED status lighting (optional). LayerRelay pushes a colour (or a WLED preset)
++  // per printer state via the WLED JSON API. Everything else (effects, palettes)
++  // is configured in WLED itself.
++  wledEnabled: false,
++  wledHost: '',
++  wledBrightness: 128,
++  wledTransitionMs: 400,
++  wledSuccessHoldSec: 300,
++  wledIdleColor: '#101010',
++  wledPrintingColor: '#1030ff',
++  wledErrorColor: '#ff0000',
++  wledSuccessColor: '#00ff00',
++  wledIdlePreset: 0,
++  wledPrintingPreset: 0,
++  wledErrorPreset: 0,
++  wledSuccessPreset: 0,
+ });
+ 
+ const ENV_OVERRIDES = Object.freeze({
+@@ -36,6 +52,8 @@ const ENV_OVERRIDES = Object.freeze({
+   NOZZLE_RTSP_URL: ['nozzleRtspUrl', 'string'],
+   NOZZLE_STREAM_ENABLED: ['nozzleStreamEnabled', 'boolean'],
+   SOURCE_CODE_URL: ['sourceCodeUrl', 'string'],
++  WLED_ENABLED: ['wledEnabled', 'boolean'],
++  WLED_HOST: ['wledHost', 'string'],
+ });
+ 
+ const KNOWN_CONFIG_KEYS = new Set([
+@@ -50,6 +68,9 @@ const KNOWN_CONFIG_KEYS = new Set([
+   'cameraStreamMaxFrameBytes',
+   'nozzleEnabled', 'nozzleRtspUrl', 'nozzleStreamEnabled', 'nozzleStreamFps', 'nozzleStreamWidth', 'nozzleStreamJpegQuality',
+   'timelapseUrl', 'nozzlePipUrl',
++  'wledEnabled', 'wledHost', 'wledBrightness', 'wledTransitionMs', 'wledSuccessHoldSec',
++  'wledIdleColor', 'wledPrintingColor', 'wledErrorColor', 'wledSuccessColor',
++  'wledIdlePreset', 'wledPrintingPreset', 'wledErrorPreset', 'wledSuccessPreset',
+   'useConnect', 'connectPrinterUuid', 'connectPollMs', 'connectClientId', 'connectRefreshToken',
+   'useNetatmo', 'netatmoClientId', 'netatmoClientSecret', 'netatmoRefreshToken', 'netatmoPollMs',
+   'lastStateWriteMs', 'maxPrinterJsonBytes', 'maxPrinterResponseBytes',
+@@ -75,6 +96,13 @@ const INTEGER_RANGES = Object.freeze({
+   nozzleStreamFps: [1, 30],
+   nozzleStreamWidth: [320, 3840],
+   nozzleStreamJpegQuality: [2, 31],
++  wledBrightness: [0, 255],
++  wledTransitionMs: [0, 10000],
++  wledSuccessHoldSec: [0, 86400],
++  wledIdlePreset: [0, 250],
++  wledPrintingPreset: [0, 250],
++  wledErrorPreset: [0, 250],
++  wledSuccessPreset: [0, 250],
+   connectPollMs: [5000, Number.MAX_SAFE_INTEGER],
+   netatmoPollMs: [60000, Number.MAX_SAFE_INTEGER],
+   lastStateWriteMs: [5000, Number.MAX_SAFE_INTEGER],
+@@ -85,10 +113,12 @@ const INTEGER_RANGES = Object.freeze({
+ const OPTIONAL_STRING_KEYS = Object.freeze([
+   '$schema', 'cameraRtspUrl', 'nozzleRtspUrl', 'nozzlePipUrl', 'timelapseUrl', 'cameraFfmpegPath', 'connectPrinterUuid',
+   'connectClientId', 'connectRefreshToken', 'netatmoClientId', 'netatmoClientSecret',
+-  'netatmoRefreshToken',
++  'netatmoRefreshToken', 'wledHost',
+ ]);
+ 
+-const OPTIONAL_BOOLEAN_KEYS = Object.freeze(['cameraStreamEnabled', 'nozzleEnabled', 'nozzleStreamEnabled', 'useConnect', 'useNetatmo']);
++const OPTIONAL_BOOLEAN_KEYS = Object.freeze(['cameraStreamEnabled', 'nozzleEnabled', 'nozzleStreamEnabled', 'useConnect', 'useNetatmo', 'wledEnabled']);
++
++const WLED_COLOR_KEYS = Object.freeze(['wledIdleColor', 'wledPrintingColor', 'wledErrorColor', 'wledSuccessColor']);
+ 
+ function firstEnvironmentValue(env, ...names) {
+   for (const name of names) {
+@@ -341,6 +371,17 @@ function validateConfig(config, { requirePrinter = true } = {}) {
+       errors.push('printNameOverrides values must be strings of at most 200 characters');
+     }
+   }
++  for (const key of WLED_COLOR_KEYS) {
++    if (config[key] != null && (typeof config[key] !== 'string' || !/^#[0-9a-f]{6}$/i.test(config[key]))) {
++      errors.push(`${key} must be a six-digit hex colour like #1030ff`);
++    }
++  }
++  if (config.wledHost != null && typeof config.wledHost === 'string' && config.wledHost.trim() !== '') {
++    const host = config.wledHost;
++    if (host !== host.trim() || /\s/.test(host) || host.includes('://') || /[/?#@]/.test(host)) {
++      errors.push('wledHost must be a hostname or IP address without a scheme, path, or whitespace');
++    }
++  }
+   if (errors.length) throw new Error(`Invalid configuration:\n- ${errors.join('\n- ')}`);
+   return config;
+ }
+diff --git a/config.schema.json b/config.schema.json
+index 7e58115..b94c84a 100644
+--- a/config.schema.json
++++ b/config.schema.json
+@@ -104,6 +104,19 @@
+       "description": "Optional http(s) URL to a timelapse gallery; shown as a link in the dashboard controls.",
+       "anyOf": [ { "const": "" }, { "type": "string", "pattern": "^https?://" } ]
+     },
++    "wledEnabled": { "type": "boolean", "default": false, "description": "Master switch for WLED status lighting. Also toggled live in the dashboard." },
++    "wledHost": { "type": "string", "default": "", "description": "WLED controller hostname or IP address, without a URL scheme (e.g. 192.168.1.60)." },
++    "wledBrightness": { "type": "integer", "minimum": 0, "maximum": 255, "default": 128, "description": "Brightness used for the colour path (0-255). Presets carry their own brightness." },
++    "wledTransitionMs": { "type": "integer", "minimum": 0, "maximum": 10000, "default": 400, "description": "Crossfade time between states, in milliseconds." },
++    "wledSuccessHoldSec": { "type": "integer", "minimum": 0, "maximum": 86400, "default": 300, "description": "How long the success colour shows after a print finishes, in seconds, before returning to the idle colour." },
++    "wledIdleColor": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$", "default": "#101010", "description": "Colour when the printer is idle." },
++    "wledPrintingColor": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$", "default": "#1030ff", "description": "Colour while printing (or paused)." },
++    "wledErrorColor": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$", "default": "#ff0000", "description": "Colour on error/attention." },
++    "wledSuccessColor": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$", "default": "#00ff00", "description": "Colour shown for wledSuccessHoldSec after a successful finish." },
++    "wledIdlePreset": { "type": "integer", "minimum": 0, "maximum": 250, "default": 0, "description": "Optional WLED preset ID for idle. 0 = use the colour instead." },
++    "wledPrintingPreset": { "type": "integer", "minimum": 0, "maximum": 250, "default": 0, "description": "Optional WLED preset ID for printing. 0 = use the colour." },
++    "wledErrorPreset": { "type": "integer", "minimum": 0, "maximum": 250, "default": 0, "description": "Optional WLED preset ID for error. 0 = use the colour." },
++    "wledSuccessPreset": { "type": "integer", "minimum": 0, "maximum": 250, "default": 0, "description": "Optional WLED preset ID for success. 0 = use the colour." },
+     "useConnect": { "type": "boolean", "default": true, "description": "Use Prusa Connect when both the printer UUID and refresh token are configured. Set false for an intentional PrusaLink-only deployment." },
+     "connectPrinterUuid": { "type": "string", "default": "" },
+     "connectPollMs": { "type": "integer", "minimum": 5000, "default": 5000 },
+diff --git a/docs/configuration.md b/docs/configuration.md
+index 7bb08ce..4cd5d2c 100644
+--- a/docs/configuration.md
++++ b/docs/configuration.md
+@@ -46,6 +46,8 @@ still reveal deployment details.
+ | `NOZZLE_RTSP_URL` | `nozzleRtspUrl` | RTSP(S) URL, empty | Private; secret if credential-bearing | `rtsp://192.0.2.20:8554/nozzle` | Optional secondary nozzle camera source, relayed to `/api/nozzle.mjpeg`. |
+ | `NOZZLE_STREAM_ENABLED` | `nozzleStreamEnabled` | boolean, automatic | Non-secret | `false` | Nozzle relay override (`true`/`false`, `1`/`0`, `yes`/`no`). |
+ | `SOURCE_CODE_URL` | `sourceCodeUrl` | HTTP(S) URL, project repository | Public | `https://github.com/GoByeBye/LayerRelay` | Corresponding source offered to remote users. Modified deployments must use their exact source revision. |
++| `WLED_ENABLED` | `wledEnabled` | boolean, `false` | Non-secret | `true` | Master switch for WLED status lighting (`true`/`false`, `1`/`0`, `yes`/`no`). |
++| `WLED_HOST` | `wledHost` | hostname/IP, empty | Deployment detail | `192.168.1.60` | WLED controller address, without a URL scheme. |
+ 
+ Every override also accepts a `LAYER_RELAY_` prefix, for example
+ `LAYER_RELAY_CONFIG` and `LAYER_RELAY_PORT`. Environment-only deployments are
+@@ -166,6 +168,37 @@ linked product photos, package data, properties, or purchase URLs. See
+ | `nozzlePipUrl` | empty, HTTP(S) URL, or path, empty | Deployment detail | `http://192.0.2.20:1984/api/stream.mjpeg?src=nozzle` | Browser-facing nozzle stream for the PiP, bypassing LayerRelay's relay for low latency. When set, the PiP shows even if the server-side nozzle relay is off. |
+ | `timelapseUrl` | empty or HTTP(S) URL, empty | Deployment detail | `http://192.0.2.50:8088/` | Optional link to a timelapse gallery, shown in the dashboard controls. |
+ 
++## WLED status lighting
++
++Optional. When enabled and a `wledHost` is set, LayerRelay pushes a colour (or a
++WLED preset) to the strip via the WLED JSON API (`POST /json/state`) whenever the
++printer state changes: idle, printing (or paused), error/attention, and a
++temporary success colour for `wledSuccessHoldSec` after a print finishes. Effects,
++palettes, and segment layout are configured in WLED itself; LayerRelay only sets
++the per-state colour/brightness/power or activates a preset. Everything below is
++also editable live from the dashboard controls.
++
++| Setting | Type and default | Sensitivity | Example | Purpose |
++|---|---|---|---|---|
++| `wledEnabled` | boolean, `false` | Non-secret | `true` | Master switch for WLED status lighting. Also toggleable in the dashboard. |
++| `wledHost` | hostname/IP, empty | Deployment detail | `192.168.1.60` | WLED controller address, no scheme. Reached over plain HTTP on the LAN. |
++| `wledBrightness` | integer 0–255, `128` | Non-secret | `160` | Brightness for the colour path. Presets carry their own brightness. |
++| `wledTransitionMs` | integer 0–10000, `400` | Non-secret | `700` | Crossfade time between states, in milliseconds. |
++| `wledSuccessHoldSec` | integer 0–86400, `300` | Non-secret | `600` | Seconds the success colour holds after a finish before reverting to idle. |
++| `wledIdleColor` | hex colour, `#101010` | Non-secret | `#101010` | Colour when idle. |
++| `wledPrintingColor` | hex colour, `#1030ff` | Non-secret | `#1030ff` | Colour while printing/paused. |
++| `wledErrorColor` | hex colour, `#ff0000` | Non-secret | `#ff0000` | Colour on error/attention. |
++| `wledSuccessColor` | hex colour, `#00ff00` | Non-secret | `#00ff00` | Colour shown after a successful finish. |
++| `wledIdlePreset` | integer 0–250, `0` | Non-secret | `0` | Optional WLED preset ID for idle. `0` uses the colour; 1–250 activates that preset. |
++| `wledPrintingPreset` | integer 0–250, `0` | Non-secret | `0` | Optional WLED preset ID for printing. `0` uses the colour. |
++| `wledErrorPreset` | integer 0–250, `0` | Non-secret | `0` | Optional WLED preset ID for error. `0` uses the colour. |
++| `wledSuccessPreset` | integer 0–250, `0` | Non-secret | `3` | Optional WLED preset ID for success. `0` uses the colour; other values activate that preset (own colour/effect/brightness). |
++
++`WLED_ENABLED` and `WLED_HOST` are also available as environment overrides for
++container deployments. LayerRelay writes only to WLED's JSON state endpoint and
++never reads or stores anything from it; the strip is a separate device you
++control, so this stays outside LayerRelay's read-only printer boundary.
++
+ ## Cloud integrations
+ 
+ Prusa Connect is the recommended telemetry source for CORE One/INDX because
+diff --git a/public/overlay.html b/public/overlay.html
+index d47b8b9..b6c9c11 100644
+--- a/public/overlay.html
++++ b/public/overlay.html
+@@ -169,6 +169,20 @@
+   #nozzle-controls[hidden] { display: none; }
+   .nz-check { display: block; font-size: 11px; color: #cdd3de; cursor: pointer; }
+   .nz-check input { vertical-align: middle; margin-right: 6px; }
++  #wled-controls { padding: 2px 2px 4px; }
++  #wled-controls[hidden] { display: none; }
++  #wled-body[hidden] { display: none; }
++  .wled-lbl { display: block; font-size: 11px; color: #9fa6b1; margin: 6px 0 2px; }
++  .wled-inp { width: 100%; box-sizing: border-box; background: rgba(255, 255, 255, 0.06);
++    border: 1px solid rgba(255, 255, 255, 0.14); color: #e6e9ef; border-radius: 6px; padding: 5px 7px; font: inherit; font-size: 12px; }
++  .wled-rows { margin-top: 6px; }
++  .wled-row { display: flex; align-items: center; gap: 8px; margin: 3px 0; }
++  .wled-name { flex: 1; font-size: 11px; color: #cdd3de; }
++  .wled-col { width: 34px; height: 22px; padding: 0; border: 1px solid rgba(255, 255, 255, 0.14);
++    border-radius: 5px; background: none; cursor: pointer; }
++  .wled-ps { width: 52px; background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.14);
++    color: #e6e9ef; border-radius: 5px; padding: 3px 5px; font: inherit; font-size: 12px; }
++  .wled-foot { margin-top: 6px; color: #858d99; font-size: 10px; line-height: 1.4; }
+   .tl-slider { width: 100%; }
+   .tl-check { display: block; font-size: 11px; color: #cdd3de; margin-bottom: 6px; cursor: pointer; }
+   .tl-check input { vertical-align: middle; margin-right: 6px; }
+@@ -554,6 +568,24 @@
+         <input id="timelapse-interval" class="tl-slider" type="range" min="1" max="20" step="1" value="10">
+       </div>
+       <a id="timelapse-link" class="control-action" href="#" target="_blank" rel="noopener" hidden>Timelapses</a>
++      <div id="wled-controls" hidden>
++        <label class="nz-check"><input id="wled-enabled" type="checkbox"> Status LEDs (WLED)</label>
++        <div id="wled-body" hidden>
++          <label class="wled-lbl" for="wled-host">Controller IP</label>
++          <input id="wled-host" class="wled-inp" type="text" inputmode="decimal" placeholder="192.168.1.60" autocomplete="off" spellcheck="false">
++          <label class="wled-lbl" for="wled-bri">Brightness <span id="wled-bri-val">128</span></label>
++          <input id="wled-bri" class="tl-slider" type="range" min="0" max="255" step="1" value="128">
++          <label class="wled-lbl" for="wled-hold">Success hold <span id="wled-hold-val">300s</span></label>
++          <input id="wled-hold" class="tl-slider" type="range" min="0" max="3600" step="10" value="300">
++          <div class="wled-rows">
++            <div class="wled-row"><span class="wled-name">Idle</span><input class="wled-col" type="color" data-state="idle" value="#101010"><input class="wled-ps" type="number" data-state="idle" min="0" max="250" value="0" title="WLED preset (0 = use colour)"></div>
++            <div class="wled-row"><span class="wled-name">Printing</span><input class="wled-col" type="color" data-state="printing" value="#1030ff"><input class="wled-ps" type="number" data-state="printing" min="0" max="250" value="0" title="WLED preset (0 = use colour)"></div>
++            <div class="wled-row"><span class="wled-name">Error</span><input class="wled-col" type="color" data-state="error" value="#ff0000"><input class="wled-ps" type="number" data-state="error" min="0" max="250" value="0" title="WLED preset (0 = use colour)"></div>
++            <div class="wled-row"><span class="wled-name">Success</span><input class="wled-col" type="color" data-state="success" value="#00ff00"><input class="wled-ps" type="number" data-state="success" min="0" max="250" value="0" title="WLED preset (0 = use colour)"></div>
++          </div>
++          <div class="wled-foot">Preset 0 uses the colour; 1&ndash;250 activates that WLED preset. Effects &amp; palettes are set in WLED.</div>
++        </div>
++      </div>
+       <div class="controls-legal">
+         <a id="source-link" href="/source" target="_blank" rel="noopener">Source &amp; AGPL license</a>
+         <span aria-hidden="true"> · </span><span>No warranty</span>
+@@ -841,6 +873,93 @@
+     initNozzleCheck();
+     if (document.activeElement !== cb) cb.checked = enabled !== false;
+   }
++  var wledReady = false;
++  var wledEditing = 0;      // ms timestamp of the last local edit; briefly ignore remote values
++  var wledHostTimer = null;
++  function putWled(bodyObj) {
++    fetch('/api/settings/wled', {
++      method: 'PUT',
++      headers: { 'Content-Type': 'application/json' },
++      body: JSON.stringify(bodyObj)
++    }).catch(function () { /* best effort */ });
++  }
++  function eachEl(sel, fn) { [].forEach.call(document.querySelectorAll(sel), fn); }
++  function initWledControls() {
++    if (wledReady) return;
++    var enabled = document.getElementById('wled-enabled');
++    if (!enabled) return;
++    wledReady = true;
++    var body = document.getElementById('wled-body');
++    var host = document.getElementById('wled-host');
++    var bri = document.getElementById('wled-bri');
++    var briVal = document.getElementById('wled-bri-val');
++    var hold = document.getElementById('wled-hold');
++    var holdVal = document.getElementById('wled-hold-val');
++    function touch() { wledEditing = Date.now(); }
++    enabled.addEventListener('change', function () {
++      if (body) body.hidden = !enabled.checked;
++      putWled({ enabled: enabled.checked });
++    });
++    if (host) {
++      host.addEventListener('input', function () {
++        touch();
++        if (wledHostTimer) clearTimeout(wledHostTimer);
++        wledHostTimer = setTimeout(function () { putWled({ host: host.value.trim() }); }, 600);
++      });
++    }
++    if (bri) {
++      bri.addEventListener('input', function () { touch(); if (briVal) briVal.textContent = bri.value; });
++      bri.addEventListener('change', function () { putWled({ brightness: parseInt(bri.value, 10) }); });
++    }
++    if (hold) {
++      hold.addEventListener('input', function () { touch(); if (holdVal) holdVal.textContent = hold.value + 's'; });
++      hold.addEventListener('change', function () { putWled({ successHoldSec: parseInt(hold.value, 10) }); });
++    }
++    eachEl('.wled-col', function (inp) {
++      inp.addEventListener('input', touch);
++      inp.addEventListener('change', function () {
++        var o = {}; o[inp.getAttribute('data-state')] = inp.value; putWled({ colors: o });
++      });
++    });
++    eachEl('.wled-ps', function (inp) {
++      inp.addEventListener('input', touch);
++      inp.addEventListener('change', function () {
++        var n = parseInt(inp.value, 10); if (isNaN(n)) n = 0;
++        n = Math.max(0, Math.min(250, n)); inp.value = String(n);
++        var o = {}; o[inp.getAttribute('data-state')] = n; putWled({ presets: o });
++      });
++    });
++  }
++  function updateWledControls(w) {
++    var wrap = document.getElementById('wled-controls');
++    if (!wrap) return;
++    wrap.hidden = false;   // always available so WLED can be enabled from the dashboard
++    initWledControls();
++    if (!w || typeof w !== 'object') return;
++    if (Date.now() - wledEditing < 1500) return; // don't clobber a field mid-edit
++    var ae = document.activeElement;
++    var enabled = document.getElementById('wled-enabled');
++    var body = document.getElementById('wled-body');
++    var host = document.getElementById('wled-host');
++    var bri = document.getElementById('wled-bri');
++    var briVal = document.getElementById('wled-bri-val');
++    var hold = document.getElementById('wled-hold');
++    var holdVal = document.getElementById('wled-hold-val');
++    if (enabled && ae !== enabled) enabled.checked = w.enabled === true;
++    if (body) body.hidden = !(w.enabled === true);
++    if (host && ae !== host && typeof w.host === 'string') host.value = w.host;
++    if (bri && ae !== bri && typeof w.brightness === 'number') { bri.value = String(w.brightness); if (briVal) briVal.textContent = String(w.brightness); }
++    if (hold && ae !== hold && typeof w.successHoldSec === 'number') { hold.value = String(w.successHoldSec); if (holdVal) holdVal.textContent = w.successHoldSec + 's'; }
++    var colors = w.colors || {}; var presets = w.presets || {};
++    eachEl('.wled-col', function (inp) {
++      var k = inp.getAttribute('data-state');
++      if (ae !== inp && typeof colors[k] === 'string' && /^#[0-9a-f]{6}$/i.test(colors[k])) inp.value = colors[k];
++    });
++    eachEl('.wled-ps', function (inp) {
++      var k = inp.getAttribute('data-state');
++      if (ae !== inp && typeof presets[k] === 'number') inp.value = String(presets[k]);
++    });
++  }
+   function applyNozzleStatus(status, pipUrl) {
+     var pip = document.getElementById('nozzle-pip');
+     var feed = document.getElementById('nozzle-feed');
+@@ -2773,6 +2892,7 @@
+         updateNozzleControls(j.nozzleConfigured, j.nozzleEnabled);
+         updateTimelapseLink(j.timelapseUrl);
+         updateTimelapseControls(j.timelapseUrl, j.timelapseIntervalSec, j.timelapsePerLayer);
++        updateWledControls(j.wled);
+         // Smoothing buffer for Z: keep the last few readings so render can reject z-hop spikes.
+         if (j.axisZ != null) { S.zHist.push(j.axisZ); if (S.zHist.length > 4) S.zHist.shift(); }
+       })
+diff --git a/server.js b/server.js
+index 49cd156..0ed16b1 100644
+--- a/server.js
++++ b/server.js
+@@ -57,6 +57,7 @@ const {
+   writeFileAtomic,
+   writeJsonAtomic,
+ } = require('./persistence.js');
++const { buildWledBody, postWledState } = require('./wled.js');
+ 
+ const runtimeConfig = loadRuntimeConfig({ rootDir: __dirname });
+ const cfg = runtimeConfig.config;
+@@ -107,6 +108,41 @@ try {
+   const savedNozzle = JSON.parse(fs.readFileSync(NOZZLE_ENABLED_FILE, 'utf8'));
+   if (savedNozzle && typeof savedNozzle.enabled === 'boolean') nozzleEnabled = savedNozzle.enabled;
+ } catch { /* keep config default */ }
++const WLED_SETTINGS_FILE = path.join(CACHE_DIR, 'wled.json');
++const WLED_STATE_KEYS = ['idle', 'printing', 'error', 'success'];
++let wled = {
++  enabled: cfg.wledEnabled === true,
++  host: typeof cfg.wledHost === 'string' ? cfg.wledHost : '',
++  brightness: cfg.wledBrightness != null ? cfg.wledBrightness : 128,
++  transitionMs: cfg.wledTransitionMs != null ? cfg.wledTransitionMs : 400,
++  successHoldSec: cfg.wledSuccessHoldSec != null ? cfg.wledSuccessHoldSec : 300,
++  colors: {
++    idle: cfg.wledIdleColor || '#101010',
++    printing: cfg.wledPrintingColor || '#1030ff',
++    error: cfg.wledErrorColor || '#ff0000',
++    success: cfg.wledSuccessColor || '#00ff00',
++  },
++  presets: {
++    idle: cfg.wledIdlePreset || 0,
++    printing: cfg.wledPrintingPreset || 0,
++    error: cfg.wledErrorPreset || 0,
++    success: cfg.wledSuccessPreset || 0,
++  },
++};
++try {
++  const saved = JSON.parse(fs.readFileSync(WLED_SETTINGS_FILE, 'utf8'));
++  if (saved && typeof saved === 'object') {
++    if (typeof saved.enabled === 'boolean') wled.enabled = saved.enabled;
++    if (typeof saved.host === 'string') wled.host = saved.host;
++    if (Number.isInteger(saved.brightness)) wled.brightness = saved.brightness;
++    if (Number.isInteger(saved.transitionMs)) wled.transitionMs = saved.transitionMs;
++    if (Number.isInteger(saved.successHoldSec)) wled.successHoldSec = saved.successHoldSec;
++    for (const k of WLED_STATE_KEYS) {
++      if (saved.colors && /^#[0-9a-f]{6}$/i.test(String(saved.colors[k] || ''))) wled.colors[k] = saved.colors[k];
++      if (saved.presets && Number.isInteger(saved.presets[k])) wled.presets[k] = saved.presets[k];
++    }
++  }
++} catch { /* keep config defaults */ }
+ const toolSettingsStore = createToolSettingsStore({
+   dataFile: path.join(CACHE_DIR, 'tool-settings.json'),
+   defaults: { toolCount: cfg.toolCount, toolSlots: cfg.toolSlots },
+@@ -1189,6 +1225,7 @@ app.get('/api/state', (_req, res) => {
+     nozzlePipUrl: nozzleEnabled ? (cfg.nozzlePipUrl || null) : null,
+     timelapseIntervalSec,
+     timelapsePerLayer,
++    wled: wledPublic(),
+     // Ambient room/outdoor readings from the Netatmo station (null when not configured).
+     roomTemp: netatmoLive ? netatmoLive.roomTemp : null,
+     roomHumidity: netatmoLive ? netatmoLive.roomHumidity : null,
+@@ -1263,6 +1300,69 @@ app.put('/api/settings/nozzle', sameOriginSettingsWrite, (req, res) => {
+   return res.json({ enabled: nozzleEnabled });
+ });
+ 
++app.put('/api/settings/wled', sameOriginSettingsWrite, (req, res) => {
++  const body = req.body || {};
++  const errors = [];
++  const next = {
++    enabled: wled.enabled, host: wled.host, brightness: wled.brightness,
++    transitionMs: wled.transitionMs, successHoldSec: wled.successHoldSec,
++    colors: { ...wled.colors }, presets: { ...wled.presets },
++  };
++  if (body.enabled !== undefined) {
++    if (typeof body.enabled !== 'boolean') errors.push('enabled must be a boolean');
++    else next.enabled = body.enabled;
++  }
++  if (body.host !== undefined) {
++    if (typeof body.host !== 'string') {
++      errors.push('host must be a string');
++    } else {
++      const h = body.host.trim();
++      if (h !== '' && (/\s/.test(h) || h.includes('://') || /[/?#@]/.test(h))) {
++        errors.push('host must be a hostname or IP address without a scheme or path');
++      } else {
++        next.host = h;
++      }
++    }
++  }
++  const intField = (key, min, max) => {
++    if (body[key] === undefined) return;
++    const n = Number(body[key]);
++    if (!Number.isInteger(n) || n < min || n > max) errors.push(`${key} must be an integer from ${min} to ${max}`);
++    else next[key] = n;
++  };
++  intField('brightness', 0, 255);
++  intField('transitionMs', 0, 10000);
++  intField('successHoldSec', 0, 86400);
++  if (body.colors !== undefined) {
++    if (!body.colors || typeof body.colors !== 'object') errors.push('colors must be an object');
++    else for (const k of WLED_STATE_KEYS) {
++      if (body.colors[k] === undefined) continue;
++      if (typeof body.colors[k] !== 'string' || !/^#[0-9a-f]{6}$/i.test(body.colors[k])) {
++        errors.push(`colors.${k} must be a six-digit hex colour`);
++      } else next.colors[k] = body.colors[k];
++    }
++  }
++  if (body.presets !== undefined) {
++    if (!body.presets || typeof body.presets !== 'object') errors.push('presets must be an object');
++    else for (const k of WLED_STATE_KEYS) {
++      if (body.presets[k] === undefined) continue;
++      const n = Number(body.presets[k]);
++      if (!Number.isInteger(n) || n < 0 || n > 250) errors.push(`presets.${k} must be an integer from 0 to 250`);
++      else next.presets[k] = n;
++    }
++  }
++  if (errors.length) return res.status(400).json({ error: errors.join('; ') });
++  wled = next;
++  try {
++    writeJsonAtomic(WLED_SETTINGS_FILE, wled);
++  } catch {
++    return res.status(500).json({ error: 'could not save WLED settings' });
++  }
++  ledLastApplied = null; // re-send on the next tick even if the LED state is unchanged
++  updateLeds(true);
++  return res.json(wledPublic());
++});
++
+ app.use(express.static(path.join(__dirname, 'public'), {
+   etag: false, lastModified: false, setHeaders: noStore,
+ }));
+@@ -1275,11 +1375,71 @@ app.get('/', (_req, res) => { noStore(res); res.sendFile(path.join(__dirname, 'p
+ // Keep all API failures JSON-only; never expose Express's HTML stack/path response.
+ app.use(createHttpErrorHandler(console));
+ 
++// ---- WLED status lighting ----------------------------------------------------
++// Map the printer state to one of four LED states and push a colour (or preset) to
++// WLED when it changes. Printing/error supersede the success hold; a successful
++// FINISHED shows the success colour for wledSuccessHoldSec, then falls back to idle.
++let ledSuccessUntil = 0;    // epoch ms the success colour holds until
++let ledLastBase = null;     // last raw base, to catch the finish edge exactly once
++let ledLastApplied = null;  // last effective state actually sent to WLED
++
++function ledEffectiveState(printerState) {
++  const s = String(printerState || '').toUpperCase();
++  let base;
++  if (s === 'ERROR') base = 'error';
++  else if (s === 'PRINTING' || s === 'PAUSED') base = 'printing';
++  else if (s === 'FINISHED') base = 'finished';
++  else base = 'idle';
++  const now = Date.now();
++  let effective;
++  if (base === 'finished') {
++    if (ledLastBase !== 'finished') ledSuccessUntil = now + Math.max(0, wled.successHoldSec) * 1000;
++    effective = now < ledSuccessUntil ? 'success' : 'idle';
++  } else if (base === 'printing' || base === 'error') {
++    ledSuccessUntil = 0; // a new print or a fault ends any celebration immediately
++    effective = base;
++  } else {
++    effective = now < ledSuccessUntil ? 'success' : 'idle';
++  }
++  ledLastBase = base;
++  return effective;
++}
++
++function updateLeds(force = false) {
++  if (!wled.enabled || !wled.host) { ledLastApplied = null; return; }
++  const effective = ledEffectiveState(mergeConnect(state).out.state);
++  if (!force && effective === ledLastApplied) return;
++  ledLastApplied = effective;
++  const body = buildWledBody({
++    colorHex: wled.colors[effective],
++    brightness: wled.brightness,
++    preset: wled.presets[effective],
++    transitionMs: wled.transitionMs,
++  });
++  postWledState(wled.host, body, { timeoutMs: 3000 }).then((r) => {
++    if (!r.ok) console.error(`[wled] ${effective} update failed: ${r.error || `HTTP ${r.status}`}`);
++  });
++}
++
++function wledPublic() {
++  return {
++    enabled: wled.enabled,
++    host: wled.host,
++    brightness: wled.brightness,
++    transitionMs: wled.transitionMs,
++    successHoldSec: wled.successHoldSec,
++    colors: { ...wled.colors },
++    presets: { ...wled.presets },
++    ledState: wled.enabled && wled.host ? ledLastApplied : null,
++  };
++}
++
+ // Self-scheduling poll loop: never overlaps requests (important when the printer
+ // API hangs), and backs off while it's failing so we don't pile onto a struggling board.
+ async function pollLoop() {
+   const base = cfg.pollIntervalMs || 2000;
+   await poll();
++  updateLeds();
+   // Back off while the printer is unreachable, but cap low so recovery (e.g. after a
+   // printer reboot) is noticed within a few seconds.
+   const delay = printerOnline ? base : Math.min(base * consecutiveFailures, 5000);
+diff --git a/test/wled.test.js b/test/wled.test.js
+new file mode 100644
+index 0000000..2fafae3
+--- /dev/null
++++ b/test/wled.test.js
+@@ -0,0 +1,79 @@
++'use strict';
++
++const assert = require('node:assert/strict');
++const { test } = require('bun:test');
++const { validateConfig, DEFAULT_CONFIG } = require('../config.js');
++const { hexToRgb, buildWledBody } = require('../wled.js');
++
++const base = {
++  printerHost: '192.0.2.10',
++  username: 'maker',
++  password: 'secret',
++  sourceCodeUrl: 'https://github.com/n8zwn/LayerRelay',
++  listenHost: '127.0.0.1',
++};
++
++test('WLED is off by default with sensible colour defaults', () => {
++  assert.equal(DEFAULT_CONFIG.wledEnabled, false);
++  assert.equal(DEFAULT_CONFIG.wledHost, '');
++  assert.equal(DEFAULT_CONFIG.wledErrorColor, '#ff0000');
++  assert.equal(DEFAULT_CONFIG.wledSuccessHoldSec, 300);
++});
++
++test('accepts a valid WLED configuration', () => {
++  const cfg = validateConfig({
++    ...base,
++    wledEnabled: true,
++    wledHost: '192.168.1.60',
++    wledBrightness: 200,
++    wledTransitionMs: 700,
++    wledSuccessHoldSec: 600,
++    wledIdleColor: '#101010',
++    wledPrintingColor: '#1030ff',
++    wledErrorColor: '#ff0000',
++    wledSuccessColor: '#00ff00',
++    wledPrintingPreset: 5,
++  });
++  assert.equal(cfg.wledHost, '192.168.1.60');
++  assert.equal(cfg.wledPrintingPreset, 5);
++});
++
++test('rejects a WLED host that includes a scheme', () => {
++  assert.throws(() => validateConfig({ ...base, wledHost: 'http://192.168.1.60' }), /wledHost/);
++});
++
++test('rejects a non-hex WLED colour', () => {
++  assert.throws(() => validateConfig({ ...base, wledPrintingColor: 'blue' }), /wledPrintingColor must be a six-digit hex/);
++});
++
++test('rejects out-of-range WLED brightness and preset', () => {
++  assert.throws(() => validateConfig({ ...base, wledBrightness: 999 }), /wledBrightness/);
++  assert.throws(() => validateConfig({ ...base, wledErrorPreset: 300 }), /wledErrorPreset/);
++});
++
++test('rejects a non-boolean wledEnabled', () => {
++  assert.throws(() => validateConfig({ ...base, wledEnabled: 'yes' }), /wledEnabled must be true or false/);
++});
++
++test('hexToRgb parses six-digit hex and rejects junk', () => {
++  assert.deepEqual(hexToRgb('#1030ff'), [16, 48, 255]);
++  assert.deepEqual(hexToRgb('00ff00'), [0, 255, 0]);
++  assert.equal(hexToRgb('nope'), null);
++});
++
++test('buildWledBody sets a solid colour on the main segment', () => {
++  const body = buildWledBody({ colorHex: '#1030ff', brightness: 128, transitionMs: 400 });
++  assert.equal(body.on, true);
++  assert.equal(body.bri, 128);
++  assert.equal(body.tt, 4); // 400ms -> 4 (100ms units)
++  assert.deepEqual(body.seg, [{ id: 0, fx: 0, col: [[16, 48, 255]] }]);
++  assert.equal(body.ps, undefined);
++});
++
++test('buildWledBody activates a preset instead of a colour when set', () => {
++  const body = buildWledBody({ colorHex: '#1030ff', brightness: 128, preset: 3, transitionMs: 700 });
++  assert.equal(body.ps, 3);
++  assert.equal(body.tt, 7);
++  assert.equal(body.seg, undefined);
++  assert.equal(body.bri, undefined);
++});
+diff --git a/wled.js b/wled.js
+new file mode 100644
+index 0000000..bebadfc
+--- /dev/null
++++ b/wled.js
+@@ -0,0 +1,99 @@
++'use strict';
++
++// Minimal WLED status-light controller. LayerRelay pushes a colour (or activates a
++// preset) per printer state through the WLED JSON API (`POST /json/state`). This is
++// the only place LayerRelay writes to WLED; it never reads or stores WLED state, so
++// the strip stays outside LayerRelay's read-only printer boundary.
++//
++// WLED JSON API reference: https://kno.wled.ge/interfaces/json-api/
++
++const http = require('node:http');
++
++const HEX_RE = /^#?([0-9a-f]{6})$/i;
++
++function hexToRgb(hex) {
++  const m = HEX_RE.exec(String(hex || '').trim());
++  if (!m) return null;
++  const n = parseInt(m[1], 16);
++  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
++}
++
++function clampInt(value, min, max, fallback) {
++  const n = Math.round(Number(value));
++  if (!Number.isFinite(n)) return fallback;
++  return Math.min(max, Math.max(min, n));
++}
++
++// Accept an optional "host:port"; default to WLED's port 80. IPv6 literals (multiple
++// colons) are passed through unchanged since WLED is virtually always reached by IPv4/mDNS.
++function splitHostPort(host) {
++  const h = String(host || '').trim();
++  const m = /^([^:]+):(\d{1,5})$/.exec(h);
++  if (m) return { host: m[1], port: Number(m[2]) };
++  return { host: h, port: 80 };
++}
++
++// Build a WLED /json/state body for one printer state. When `preset` is a positive
++// integer the whole preset is activated (it defines its own colour/effect/brightness);
++// otherwise a solid colour (fx 0) is set on the main segment with the given brightness.
++function buildWledBody({ colorHex, brightness, preset, transitionMs, on = true } = {}) {
++  const body = { on: on !== false };
++  // WLED "tt" is a one-shot transition expressed in 100ms units (e.g. 400ms -> 4).
++  body.tt = clampInt(Math.round(clampInt(transitionMs, 0, 65000, 400) / 100), 0, 255, 4);
++  const presetId = clampInt(preset, 0, 250, 0);
++  if (presetId > 0) {
++    body.ps = presetId;
++    return body;
++  }
++  const rgb = hexToRgb(colorHex);
++  body.bri = clampInt(brightness, 0, 255, 128);
++  body.seg = [{ id: 0, fx: 0, col: [rgb || [0, 0, 0]] }];
++  return body;
++}
++
++// POST a body to http://<host>/json/state. Resolves { ok, status?, error? } and never
++// rejects, so a missing/asleep controller can never crash the poll loop.
++function postWledState(host, body, { timeoutMs = 3000, port } = {}) {
++  const target = splitHostPort(host);
++  return new Promise((resolve) => {
++    let payload;
++    try {
++      payload = Buffer.from(JSON.stringify(body), 'utf8');
++    } catch (error) {
++      resolve({ ok: false, error: error.message });
++      return;
++    }
++    let settled = false;
++    const done = (result) => { if (!settled) { settled = true; resolve(result); } };
++    let req;
++    try {
++      req = http.request(
++        {
++          host: target.host,
++          port: port || target.port,
++          path: '/json/state',
++          method: 'POST',
++          headers: {
++            'Content-Type': 'application/json',
++            'Content-Length': payload.length,
++          },
++        },
++        (res) => {
++          const ok = res.statusCode >= 200 && res.statusCode < 300;
++          res.resume(); // drain and discard; we don't read WLED state
++          res.on('end', () => done({ ok, status: res.statusCode }));
++          res.on('error', (error) => done({ ok: false, error: error.message }));
++        },
++      );
++    } catch (error) {
++      done({ ok: false, error: error.message });
++      return;
++    }
++    req.setTimeout(timeoutMs, () => { req.destroy(new Error('WLED request timed out')); });
++    req.on('error', (error) => done({ ok: false, error: error.message }));
++    req.write(payload);
++    req.end();
++  });
++}
++
++module.exports = { hexToRgb, buildWledBody, postWledState };

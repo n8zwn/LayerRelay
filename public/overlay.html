@@ -169,6 +169,20 @@
   #nozzle-controls[hidden] { display: none; }
   .nz-check { display: block; font-size: 11px; color: #cdd3de; cursor: pointer; }
   .nz-check input { vertical-align: middle; margin-right: 6px; }
+  #wled-controls { padding: 2px 2px 4px; }
+  #wled-controls[hidden] { display: none; }
+  #wled-body[hidden] { display: none; }
+  .wled-lbl { display: block; font-size: 11px; color: #9fa6b1; margin: 6px 0 2px; }
+  .wled-inp { width: 100%; box-sizing: border-box; background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.14); color: #e6e9ef; border-radius: 6px; padding: 5px 7px; font: inherit; font-size: 12px; }
+  .wled-rows { margin-top: 6px; }
+  .wled-row { display: flex; align-items: center; gap: 8px; margin: 3px 0; }
+  .wled-name { flex: 1; font-size: 11px; color: #cdd3de; }
+  .wled-col { width: 34px; height: 22px; padding: 0; border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 5px; background: none; cursor: pointer; }
+  .wled-ps { width: 52px; background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.14);
+    color: #e6e9ef; border-radius: 5px; padding: 3px 5px; font: inherit; font-size: 12px; }
+  .wled-foot { margin-top: 6px; color: #858d99; font-size: 10px; line-height: 1.4; }
   .tl-slider { width: 100%; }
   .tl-check { display: block; font-size: 11px; color: #cdd3de; margin-bottom: 6px; cursor: pointer; }
   .tl-check input { vertical-align: middle; margin-right: 6px; }
@@ -554,6 +568,24 @@
         <input id="timelapse-interval" class="tl-slider" type="range" min="1" max="20" step="1" value="10">
       </div>
       <a id="timelapse-link" class="control-action" href="#" target="_blank" rel="noopener" hidden>Timelapses</a>
+      <div id="wled-controls" hidden>
+        <label class="nz-check"><input id="wled-enabled" type="checkbox"> Status LEDs (WLED)</label>
+        <div id="wled-body" hidden>
+          <label class="wled-lbl" for="wled-host">Controller IP</label>
+          <input id="wled-host" class="wled-inp" type="text" inputmode="decimal" placeholder="192.168.1.60" autocomplete="off" spellcheck="false">
+          <label class="wled-lbl" for="wled-bri">Brightness <span id="wled-bri-val">128</span></label>
+          <input id="wled-bri" class="tl-slider" type="range" min="0" max="255" step="1" value="128">
+          <label class="wled-lbl" for="wled-hold">Success hold <span id="wled-hold-val">300s</span></label>
+          <input id="wled-hold" class="tl-slider" type="range" min="0" max="3600" step="10" value="300">
+          <div class="wled-rows">
+            <div class="wled-row"><span class="wled-name">Idle</span><input class="wled-col" type="color" data-state="idle" value="#101010"><input class="wled-ps" type="number" data-state="idle" min="0" max="250" value="0" title="WLED preset (0 = use colour)"></div>
+            <div class="wled-row"><span class="wled-name">Printing</span><input class="wled-col" type="color" data-state="printing" value="#1030ff"><input class="wled-ps" type="number" data-state="printing" min="0" max="250" value="0" title="WLED preset (0 = use colour)"></div>
+            <div class="wled-row"><span class="wled-name">Error</span><input class="wled-col" type="color" data-state="error" value="#ff0000"><input class="wled-ps" type="number" data-state="error" min="0" max="250" value="0" title="WLED preset (0 = use colour)"></div>
+            <div class="wled-row"><span class="wled-name">Success</span><input class="wled-col" type="color" data-state="success" value="#00ff00"><input class="wled-ps" type="number" data-state="success" min="0" max="250" value="0" title="WLED preset (0 = use colour)"></div>
+          </div>
+          <div class="wled-foot">Preset 0 uses the colour; 1&ndash;250 activates that WLED preset. Effects &amp; palettes are set in WLED.</div>
+        </div>
+      </div>
       <div class="controls-legal">
         <a id="source-link" href="/source" target="_blank" rel="noopener">Source &amp; AGPL license</a>
         <span aria-hidden="true"> · </span><span>No warranty</span>
@@ -840,6 +872,93 @@
     if (!configured) return;
     initNozzleCheck();
     if (document.activeElement !== cb) cb.checked = enabled !== false;
+  }
+  var wledReady = false;
+  var wledEditing = 0;      // ms timestamp of the last local edit; briefly ignore remote values
+  var wledHostTimer = null;
+  function putWled(bodyObj) {
+    fetch('/api/settings/wled', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(bodyObj)
+    }).catch(function () { /* best effort */ });
+  }
+  function eachEl(sel, fn) { [].forEach.call(document.querySelectorAll(sel), fn); }
+  function initWledControls() {
+    if (wledReady) return;
+    var enabled = document.getElementById('wled-enabled');
+    if (!enabled) return;
+    wledReady = true;
+    var body = document.getElementById('wled-body');
+    var host = document.getElementById('wled-host');
+    var bri = document.getElementById('wled-bri');
+    var briVal = document.getElementById('wled-bri-val');
+    var hold = document.getElementById('wled-hold');
+    var holdVal = document.getElementById('wled-hold-val');
+    function touch() { wledEditing = Date.now(); }
+    enabled.addEventListener('change', function () {
+      if (body) body.hidden = !enabled.checked;
+      putWled({ enabled: enabled.checked });
+    });
+    if (host) {
+      host.addEventListener('input', function () {
+        touch();
+        if (wledHostTimer) clearTimeout(wledHostTimer);
+        wledHostTimer = setTimeout(function () { putWled({ host: host.value.trim() }); }, 600);
+      });
+    }
+    if (bri) {
+      bri.addEventListener('input', function () { touch(); if (briVal) briVal.textContent = bri.value; });
+      bri.addEventListener('change', function () { putWled({ brightness: parseInt(bri.value, 10) }); });
+    }
+    if (hold) {
+      hold.addEventListener('input', function () { touch(); if (holdVal) holdVal.textContent = hold.value + 's'; });
+      hold.addEventListener('change', function () { putWled({ successHoldSec: parseInt(hold.value, 10) }); });
+    }
+    eachEl('.wled-col', function (inp) {
+      inp.addEventListener('input', touch);
+      inp.addEventListener('change', function () {
+        var o = {}; o[inp.getAttribute('data-state')] = inp.value; putWled({ colors: o });
+      });
+    });
+    eachEl('.wled-ps', function (inp) {
+      inp.addEventListener('input', touch);
+      inp.addEventListener('change', function () {
+        var n = parseInt(inp.value, 10); if (isNaN(n)) n = 0;
+        n = Math.max(0, Math.min(250, n)); inp.value = String(n);
+        var o = {}; o[inp.getAttribute('data-state')] = n; putWled({ presets: o });
+      });
+    });
+  }
+  function updateWledControls(w) {
+    var wrap = document.getElementById('wled-controls');
+    if (!wrap) return;
+    wrap.hidden = false;   // always available so WLED can be enabled from the dashboard
+    initWledControls();
+    if (!w || typeof w !== 'object') return;
+    if (Date.now() - wledEditing < 1500) return; // don't clobber a field mid-edit
+    var ae = document.activeElement;
+    var enabled = document.getElementById('wled-enabled');
+    var body = document.getElementById('wled-body');
+    var host = document.getElementById('wled-host');
+    var bri = document.getElementById('wled-bri');
+    var briVal = document.getElementById('wled-bri-val');
+    var hold = document.getElementById('wled-hold');
+    var holdVal = document.getElementById('wled-hold-val');
+    if (enabled && ae !== enabled) enabled.checked = w.enabled === true;
+    if (body) body.hidden = !(w.enabled === true);
+    if (host && ae !== host && typeof w.host === 'string') host.value = w.host;
+    if (bri && ae !== bri && typeof w.brightness === 'number') { bri.value = String(w.brightness); if (briVal) briVal.textContent = String(w.brightness); }
+    if (hold && ae !== hold && typeof w.successHoldSec === 'number') { hold.value = String(w.successHoldSec); if (holdVal) holdVal.textContent = w.successHoldSec + 's'; }
+    var colors = w.colors || {}; var presets = w.presets || {};
+    eachEl('.wled-col', function (inp) {
+      var k = inp.getAttribute('data-state');
+      if (ae !== inp && typeof colors[k] === 'string' && /^#[0-9a-f]{6}$/i.test(colors[k])) inp.value = colors[k];
+    });
+    eachEl('.wled-ps', function (inp) {
+      var k = inp.getAttribute('data-state');
+      if (ae !== inp && typeof presets[k] === 'number') inp.value = String(presets[k]);
+    });
   }
   function applyNozzleStatus(status, pipUrl) {
     var pip = document.getElementById('nozzle-pip');
@@ -2773,6 +2892,7 @@
         updateNozzleControls(j.nozzleConfigured, j.nozzleEnabled);
         updateTimelapseLink(j.timelapseUrl);
         updateTimelapseControls(j.timelapseUrl, j.timelapseIntervalSec, j.timelapsePerLayer);
+        updateWledControls(j.wled);
         // Smoothing buffer for Z: keep the last few readings so render can reject z-hop spikes.
         if (j.axisZ != null) { S.zHist.push(j.axisZ); if (S.zHist.length > 4) S.zHist.shift(); }
       })

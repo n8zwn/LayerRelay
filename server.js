@@ -57,6 +57,7 @@ const {
   writeFileAtomic,
   writeJsonAtomic,
 } = require('./persistence.js');
+const { buildWledBody, postWledState } = require('./wled.js');
 
 const runtimeConfig = loadRuntimeConfig({ rootDir: __dirname });
 const cfg = runtimeConfig.config;
@@ -107,6 +108,41 @@ try {
   const savedNozzle = JSON.parse(fs.readFileSync(NOZZLE_ENABLED_FILE, 'utf8'));
   if (savedNozzle && typeof savedNozzle.enabled === 'boolean') nozzleEnabled = savedNozzle.enabled;
 } catch { /* keep config default */ }
+const WLED_SETTINGS_FILE = path.join(CACHE_DIR, 'wled.json');
+const WLED_STATE_KEYS = ['idle', 'printing', 'error', 'success'];
+let wled = {
+  enabled: cfg.wledEnabled === true,
+  host: typeof cfg.wledHost === 'string' ? cfg.wledHost : '',
+  brightness: cfg.wledBrightness != null ? cfg.wledBrightness : 128,
+  transitionMs: cfg.wledTransitionMs != null ? cfg.wledTransitionMs : 400,
+  successHoldSec: cfg.wledSuccessHoldSec != null ? cfg.wledSuccessHoldSec : 300,
+  colors: {
+    idle: cfg.wledIdleColor || '#101010',
+    printing: cfg.wledPrintingColor || '#1030ff',
+    error: cfg.wledErrorColor || '#ff0000',
+    success: cfg.wledSuccessColor || '#00ff00',
+  },
+  presets: {
+    idle: cfg.wledIdlePreset || 0,
+    printing: cfg.wledPrintingPreset || 0,
+    error: cfg.wledErrorPreset || 0,
+    success: cfg.wledSuccessPreset || 0,
+  },
+};
+try {
+  const saved = JSON.parse(fs.readFileSync(WLED_SETTINGS_FILE, 'utf8'));
+  if (saved && typeof saved === 'object') {
+    if (typeof saved.enabled === 'boolean') wled.enabled = saved.enabled;
+    if (typeof saved.host === 'string') wled.host = saved.host;
+    if (Number.isInteger(saved.brightness)) wled.brightness = saved.brightness;
+    if (Number.isInteger(saved.transitionMs)) wled.transitionMs = saved.transitionMs;
+    if (Number.isInteger(saved.successHoldSec)) wled.successHoldSec = saved.successHoldSec;
+    for (const k of WLED_STATE_KEYS) {
+      if (saved.colors && /^#[0-9a-f]{6}$/i.test(String(saved.colors[k] || ''))) wled.colors[k] = saved.colors[k];
+      if (saved.presets && Number.isInteger(saved.presets[k])) wled.presets[k] = saved.presets[k];
+    }
+  }
+} catch { /* keep config defaults */ }
 const toolSettingsStore = createToolSettingsStore({
   dataFile: path.join(CACHE_DIR, 'tool-settings.json'),
   defaults: { toolCount: cfg.toolCount, toolSlots: cfg.toolSlots },
@@ -1189,6 +1225,7 @@ app.get('/api/state', (_req, res) => {
     nozzlePipUrl: nozzleEnabled ? (cfg.nozzlePipUrl || null) : null,
     timelapseIntervalSec,
     timelapsePerLayer,
+    wled: wledPublic(),
     // Ambient room/outdoor readings from the Netatmo station (null when not configured).
     roomTemp: netatmoLive ? netatmoLive.roomTemp : null,
     roomHumidity: netatmoLive ? netatmoLive.roomHumidity : null,
@@ -1263,6 +1300,69 @@ app.put('/api/settings/nozzle', sameOriginSettingsWrite, (req, res) => {
   return res.json({ enabled: nozzleEnabled });
 });
 
+app.put('/api/settings/wled', sameOriginSettingsWrite, (req, res) => {
+  const body = req.body || {};
+  const errors = [];
+  const next = {
+    enabled: wled.enabled, host: wled.host, brightness: wled.brightness,
+    transitionMs: wled.transitionMs, successHoldSec: wled.successHoldSec,
+    colors: { ...wled.colors }, presets: { ...wled.presets },
+  };
+  if (body.enabled !== undefined) {
+    if (typeof body.enabled !== 'boolean') errors.push('enabled must be a boolean');
+    else next.enabled = body.enabled;
+  }
+  if (body.host !== undefined) {
+    if (typeof body.host !== 'string') {
+      errors.push('host must be a string');
+    } else {
+      const h = body.host.trim();
+      if (h !== '' && (/\s/.test(h) || h.includes('://') || /[/?#@]/.test(h))) {
+        errors.push('host must be a hostname or IP address without a scheme or path');
+      } else {
+        next.host = h;
+      }
+    }
+  }
+  const intField = (key, min, max) => {
+    if (body[key] === undefined) return;
+    const n = Number(body[key]);
+    if (!Number.isInteger(n) || n < min || n > max) errors.push(`${key} must be an integer from ${min} to ${max}`);
+    else next[key] = n;
+  };
+  intField('brightness', 0, 255);
+  intField('transitionMs', 0, 10000);
+  intField('successHoldSec', 0, 86400);
+  if (body.colors !== undefined) {
+    if (!body.colors || typeof body.colors !== 'object') errors.push('colors must be an object');
+    else for (const k of WLED_STATE_KEYS) {
+      if (body.colors[k] === undefined) continue;
+      if (typeof body.colors[k] !== 'string' || !/^#[0-9a-f]{6}$/i.test(body.colors[k])) {
+        errors.push(`colors.${k} must be a six-digit hex colour`);
+      } else next.colors[k] = body.colors[k];
+    }
+  }
+  if (body.presets !== undefined) {
+    if (!body.presets || typeof body.presets !== 'object') errors.push('presets must be an object');
+    else for (const k of WLED_STATE_KEYS) {
+      if (body.presets[k] === undefined) continue;
+      const n = Number(body.presets[k]);
+      if (!Number.isInteger(n) || n < 0 || n > 250) errors.push(`presets.${k} must be an integer from 0 to 250`);
+      else next.presets[k] = n;
+    }
+  }
+  if (errors.length) return res.status(400).json({ error: errors.join('; ') });
+  wled = next;
+  try {
+    writeJsonAtomic(WLED_SETTINGS_FILE, wled);
+  } catch {
+    return res.status(500).json({ error: 'could not save WLED settings' });
+  }
+  ledLastApplied = null; // re-send on the next tick even if the LED state is unchanged
+  updateLeds(true);
+  return res.json(wledPublic());
+});
+
 app.use(express.static(path.join(__dirname, 'public'), {
   etag: false, lastModified: false, setHeaders: noStore,
 }));
@@ -1275,11 +1375,71 @@ app.get('/', (_req, res) => { noStore(res); res.sendFile(path.join(__dirname, 'p
 // Keep all API failures JSON-only; never expose Express's HTML stack/path response.
 app.use(createHttpErrorHandler(console));
 
+// ---- WLED status lighting ----------------------------------------------------
+// Map the printer state to one of four LED states and push a colour (or preset) to
+// WLED when it changes. Printing/error supersede the success hold; a successful
+// FINISHED shows the success colour for wledSuccessHoldSec, then falls back to idle.
+let ledSuccessUntil = 0;    // epoch ms the success colour holds until
+let ledLastBase = null;     // last raw base, to catch the finish edge exactly once
+let ledLastApplied = null;  // last effective state actually sent to WLED
+
+function ledEffectiveState(printerState) {
+  const s = String(printerState || '').toUpperCase();
+  let base;
+  if (s === 'ERROR') base = 'error';
+  else if (s === 'PRINTING' || s === 'PAUSED') base = 'printing';
+  else if (s === 'FINISHED') base = 'finished';
+  else base = 'idle';
+  const now = Date.now();
+  let effective;
+  if (base === 'finished') {
+    if (ledLastBase !== 'finished') ledSuccessUntil = now + Math.max(0, wled.successHoldSec) * 1000;
+    effective = now < ledSuccessUntil ? 'success' : 'idle';
+  } else if (base === 'printing' || base === 'error') {
+    ledSuccessUntil = 0; // a new print or a fault ends any celebration immediately
+    effective = base;
+  } else {
+    effective = now < ledSuccessUntil ? 'success' : 'idle';
+  }
+  ledLastBase = base;
+  return effective;
+}
+
+function updateLeds(force = false) {
+  if (!wled.enabled || !wled.host) { ledLastApplied = null; return; }
+  const effective = ledEffectiveState(mergeConnect(state).out.state);
+  if (!force && effective === ledLastApplied) return;
+  ledLastApplied = effective;
+  const body = buildWledBody({
+    colorHex: wled.colors[effective],
+    brightness: wled.brightness,
+    preset: wled.presets[effective],
+    transitionMs: wled.transitionMs,
+  });
+  postWledState(wled.host, body, { timeoutMs: 3000 }).then((r) => {
+    if (!r.ok) console.error(`[wled] ${effective} update failed: ${r.error || `HTTP ${r.status}`}`);
+  });
+}
+
+function wledPublic() {
+  return {
+    enabled: wled.enabled,
+    host: wled.host,
+    brightness: wled.brightness,
+    transitionMs: wled.transitionMs,
+    successHoldSec: wled.successHoldSec,
+    colors: { ...wled.colors },
+    presets: { ...wled.presets },
+    ledState: wled.enabled && wled.host ? ledLastApplied : null,
+  };
+}
+
 // Self-scheduling poll loop: never overlaps requests (important when the printer
 // API hangs), and backs off while it's failing so we don't pile onto a struggling board.
 async function pollLoop() {
   const base = cfg.pollIntervalMs || 2000;
   await poll();
+  updateLeds();
   // Back off while the printer is unreachable, but cap low so recovery (e.g. after a
   // printer reboot) is noticed within a few seconds.
   const delay = printerOnline ? base : Math.min(base * consecutiveFailures, 5000);
