@@ -8,8 +8,9 @@
 > of [LayerRelay by GoByeBye](https://github.com/GoByeBye/LayerRelay). On top of
 > upstream it adds an optional second **nozzle camera** shown as a draggable,
 > low-latency picture-in-picture in the overlay, a **nozzle on/off master switch**
-> in the dashboard controls, a **per-layer timelapse** toggle, and a companion
-> **print-aware timelapse service** that captures and auto-renders both cameras.
+> in the dashboard controls, a **per-layer timelapse** toggle, a companion
+> **print-aware timelapse service** that captures and auto-renders both cameras,
+> and optional **WLED status lighting** that colours an LED strip by printer state.
 > It is **deployed entirely as containers** (see the Quick start below).
 > Everything else tracks upstream. Same license as upstream
 > (AGPL-3.0-or-later); original credit and third-party notices are unchanged in
@@ -160,6 +161,20 @@ runs (on a timer, or one frame per layer when that checkbox is on), and
 auto-renders an MP4 per camera when the print finishes, with a
 browse/download/delete gallery. Deploy it from `timelapse/timelapse-compose.yml`
 and see [`timelapse/README.md`](timelapse/README.md) for setup and tuning.
+
+### 5. WLED status lighting (optional)
+
+Drive a [WLED](https://kno.wled.ge/) LED strip from the printer's state. Enable it
+with the **Status LEDs (WLED)** control in the dashboard (or `wledEnabled` in the
+config), set the controller's IP, and pick a colour — or an optional WLED preset —
+for each state: idle, printing (or paused), error/attention, and a temporary
+success colour that holds for a configurable time after a print finishes before
+returning to idle. Brightness, crossfade time, and the success-hold duration are
+configurable too. LayerRelay only writes to WLED's JSON API (`POST /json/state`);
+effects, palettes, and segments are configured in WLED itself. It never reads or
+stores anything from the controller, so the strip stays outside LayerRelay's
+read-only printer boundary. See the WLED settings table in
+[docs/configuration.md](docs/configuration.md#wled-status-lighting) for every key.
 
 Move the pointer to reveal **Dashboard**, then choose **Tools & filament**.
 Tool count, loaded/empty state, and material follow Prusa Connect automatically
